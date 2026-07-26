@@ -1,0 +1,7 @@
+thirdparty/
+*.o
+*.bin
+*.iso
+isodir/
+boot.o
+build/
