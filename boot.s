@@ -25,6 +25,7 @@ extern kernel_main
 
 _start:
     mov esp, stack_top   ; set up the stack (C code needs this)
+    push ebx              ; multiboot info pointer, set by GRUB before jumping here
     call kernel_main      ; jump into our C kernel
     cli
 .hang:

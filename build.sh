@@ -3,6 +3,7 @@
 # Usage:
 #   ./build.sh                  build only
 #   ./build.sh run              build + boot in QEMU (graphical window)
+#   ./build.sh test             build + boot headless, serial output to stdout
 #   ./build.sh clean            remove build artifacts
 #   ./build.sh install-tcc      build tcc      (local, no sudo, no system deps used)
 #   ./build.sh install-xorriso  build xorriso  (local, no sudo, no system deps used)
@@ -10,17 +11,22 @@
 #   ./build.sh install-grub     build grub     (local, no sudo, no system deps used)
 #   ./build.sh install-all      build all of the above, in dependency order
 #
-# All install-* targets build into thirdparty/local and NEVER use anything
+# All install-* targets build into .thirdparty/local and NEVER use anything
 # already on the system, even if a system copy exists -- this keeps the
 # whole toolchain self-contained and reproducible. build/run put
-# thirdparty/local/bin first on PATH so these are what actually get used.
+# .thirdparty/local/bin first on PATH so these are what actually get used.
 
 set -e
 
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
-PREFIX="$SCRIPT_DIR/thirdparty/local"
+PREFIX="$SCRIPT_DIR/.thirdparty/local"
 
-TCC_SRC_DIR="${TCC_SRC_DIR:-$SCRIPT_DIR/thirdparty/src/tinycc}"
+if [ -f "$SCRIPT_DIR/config.mk" ]; then
+    . "$SCRIPT_DIR/config.mk"
+fi
+MEMORY_MB="${MEMORY_MB:-256}"
+
+TCC_SRC_DIR="${TCC_SRC_DIR:-$SCRIPT_DIR/.thirdparty/src/tinycc}"
 
 XORRISO_VERSION="${XORRISO_VERSION:-1.5.8.pl02}"
 XORRISO_URL="${XORRISO_URL:-https://www.gnu.org/software/xorriso/xorriso-${XORRISO_VERSION}.tar.gz}"
@@ -43,8 +49,8 @@ ASFLAGS="-f elf32"
 LDFLAGS="-m elf_i386 -T linker.ld -nostdlib"
 
 SRC_DIR=src
-BUILD_DIR=build
-ISODIR=isodir
+BUILD_DIR=.build
+ISODIR=.isodir
 ISO=lucid.iso
 BIN=lucid.bin
 
@@ -61,7 +67,15 @@ build() {
     "$AS" $ASFLAGS boot.s -o "$BUILD_DIR/boot.o"
     objs="$objs $BUILD_DIR/boot.o"
 
-    for src in "$SRC_DIR"/*.c; do
+for src in "$SRC_DIR"/*.s "$SRC_DIR"/boot/*.s; do
+        [ -e "$src" ] || continue
+        obj="$BUILD_DIR/$(basename "${src%.s}").o"
+        echo "[as] $src"
+        "$AS" $ASFLAGS "$src" -o "$obj"
+        objs="$objs $obj"
+    done
+
+    for src in "$SRC_DIR"/*.c "$SRC_DIR"/boot/*.c; do
         [ -e "$src" ] || continue
         obj="$BUILD_DIR/$(basename "${src%.c}").o"
         echo "[cc] $src"
@@ -98,7 +112,17 @@ QEMU_DISPLAY="${QEMU_DISPLAY:-sdl}"
 
 run() {
     build
-    qemu-system-i386 -cdrom "$ISO" -display "$QEMU_DISPLAY" -vga std
+    qemu-system-i386 -cdrom "$ISO" -display "$QEMU_DISPLAY" -vga std -m "${MEMORY_MB}M"
+}
+
+# Headless boot with serial routed to stdout -- no window, no display
+# server needed. Useful as a quick sanity check (does it boot without
+# a triple fault / exception halt) since idt.c already logs exceptions
+# via serial_print. Ctrl-A X to exit qemu.
+test() {
+    build
+    echo "[test] booting headless, serial -> stdout (Ctrl-A X to quit)"
+    qemu-system-i386 -cdrom "$ISO" -m "${MEMORY_MB}M" -display none -serial stdio
 }
 
 ensure_gitignored() {
@@ -169,7 +193,7 @@ install_tcc() {
         exit 1
     }
 
-    ensure_gitignored "thirdparty/"
+    ensure_gitignored ".thirdparty/"
 
     if [ -d "$TCC_SRC_DIR" ]; then
         echo "[install-tcc] found existing source at $TCC_SRC_DIR, pulling latest"
@@ -191,7 +215,7 @@ install_tcc() {
 
     echo "[install-tcc] verifying -m32 support"
     if "$PREFIX/bin/tcc" -m32 -v >/dev/null 2>&1; then
-        echo "[install-tcc] OK: thirdparty/local/bin/tcc supports -m32"
+        echo "[install-tcc] OK: .thirdparty/local/bin/tcc supports -m32"
     else
         echo "[install-tcc] WARNING: tcc -m32 still failing, check output above" >&2
         exit 1
@@ -209,9 +233,9 @@ install_xorriso() {
         exit 1
     }
 
-    ensure_gitignored "thirdparty/"
+    ensure_gitignored ".thirdparty/"
 
-    src_dir="$(fetch_and_extract "$XORRISO_URL" "$XORRISO_VERSION" "xorriso-*" "$SCRIPT_DIR/thirdparty/src")"
+    src_dir="$(fetch_and_extract "$XORRISO_URL" "$XORRISO_VERSION" "xorriso-*" "$SCRIPT_DIR/.thirdparty/src")"
     echo "[install-xorriso] source at $src_dir"
 
     echo "[install-xorriso] configuring, prefix=$PREFIX"
@@ -243,9 +267,9 @@ install_mtools() {
         exit 1
     }
 
-    ensure_gitignored "thirdparty/"
+    ensure_gitignored ".thirdparty/"
 
-    src_dir="$(fetch_and_extract "$MTOOLS_URL" "$MTOOLS_VERSION" "mtools-*" "$SCRIPT_DIR/thirdparty/src")"
+    src_dir="$(fetch_and_extract "$MTOOLS_URL" "$MTOOLS_VERSION" "mtools-*" "$SCRIPT_DIR/.thirdparty/src")"
     echo "[install-mtools] source at $src_dir"
 
     echo "[install-mtools] configuring, prefix=$PREFIX"
@@ -259,7 +283,7 @@ install_mtools() {
 
     echo "[install-mtools] verifying"
     if [ -x "$PREFIX/bin/mformat" ]; then
-        echo "[install-mtools] OK: thirdparty/local/bin/mformat installed"
+        echo "[install-mtools] OK: .thirdparty/local/bin/mformat installed"
     else
         echo "[install-mtools] WARNING: mformat still not found after install" >&2
         exit 1
@@ -289,9 +313,9 @@ install_grub() {
         exit 1
     }
 
-    ensure_gitignored "thirdparty/"
+    ensure_gitignored ".thirdparty/"
 
-    src_dir="$(fetch_and_extract "$GRUB_URL" "$GRUB_VERSION" "grub-*" "$SCRIPT_DIR/thirdparty/src")"
+    src_dir="$(fetch_and_extract "$GRUB_URL" "$GRUB_VERSION" "grub-*" "$SCRIPT_DIR/.thirdparty/src")"
     echo "[install-grub] source at $src_dir"
 
     echo "[install-grub] configuring for BIOS (i386-pc) platform, prefix=$PREFIX"
@@ -323,12 +347,13 @@ install_all() {
     install_xorriso
     install_mtools
     install_grub
-    echo "[install-all] done. thirdparty/local/bin now has a fully self-contained toolchain."
+    echo "[install-all] done. .thirdparty/local/bin now has a fully self-contained toolchain."
 }
 
 case "$1" in
     clean)           clean ;;
     run)             run ;;
+    test)            test ;;
     install-tcc)     install_tcc ;;
     install-xorriso) install_xorriso ;;
     install-mtools)  install_mtools ;;
@@ -336,7 +361,7 @@ case "$1" in
     install-all)     install_all ;;
     "")              build ;;
     *)
-        echo "usage: $0 [run|clean|install-tcc|install-xorriso|install-mtools|install-grub|install-all]" >&2
+        echo "usage: $0 [run|test|clean|install-tcc|install-xorriso|install-mtools|install-grub|install-all]" >&2
         exit 1
         ;;
 esac

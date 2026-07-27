@@ -2,6 +2,8 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <gdt.h>
+#inlcude <tss.h>
 
 /* --- Serial port (COM1, 0x3F8) --- 
  * Lets us verify the kernel is actually running, independent of
@@ -39,37 +41,54 @@ static void serial_putc(char c) {
     outb(COM1, (uint8_t)c);
 }
 
-static void serial_print(const char* s) {
+void serial_print(const char* s) {
     for (size_t i = 0; s[i] != '\0'; i++)
         serial_putc(s[i]);
 }
 
-/* --- VGA text mode (0xB8000) --- */
-static uint16_t* const VGA_BUFFER = (uint16_t*) 0xB8000;
-static const int VGA_WIDTH = 80;
-static const int VGA_HEIGHT = 25;
-
-static inline uint16_t vga_entry(char c, uint8_t color) {
-    return (uint16_t)c | (uint16_t)color << 8;
+void serial_print_hex(uint32_t n) {
+    const char* hex = "0123456789ABCDEF";
+    char buf[11] = "0x00000000";
+    for (int i = 9; i >= 2; i--) {
+        buf[i] = hex[n & 0xF];
+        n >>= 4;
+    }
+    serial_print(buf);
 }
 
-void kernel_main(void) {
+/* --- VGA text mode: see terminal.c --- */
+extern void terminal_initialize(void);
+extern void terminal_writestring(const char* s);
+
+extern void gdt_install(void);
+extern void idt_install(void);
+extern void keyboard_install(void);
+extern void print_boot_stats(uint32_t mb_info_addr);
+
+void kernel_main(uint32_t mb_info_addr) {
     serial_init();
     serial_print("kernel_main() reached, serial is alive\n");
 
-    const uint8_t color = 0x0A; /* light green on black */
-    const char* msg = "Lucid Kernel booted!";
+    gdt_install();
+    serial_print("GDT installed\n");
 
-    /* clear screen */
-    for (int y = 0; y < VGA_HEIGHT; y++)
-        for (int x = 0; x < VGA_WIDTH; x++)
-            VGA_BUFFER[y * VGA_WIDTH + x] = vga_entry(' ', color);
+    idt_install();
+    serial_print("IDT installed\n");
 
-    /* print message on first row */
-    for (size_t i = 0; msg[i] != '\0'; i++)
-        VGA_BUFFER[i] = vga_entry(msg[i], color);
+    __asm__ volatile ("sti");
+    serial_print("interrupts enabled\n");
 
-    serial_print("VGA buffer written\n");
+    __asm__ volatile ("int $0x3"); /* breakpoint, should return cleanly */
+    serial_print("survived a test interrupt (int3)\n");
+
+    keyboard_install();
+    serial_print("keyboard driver installed\n");
+
+    terminal_initialize();
+    print_boot_stats(mb_info_addr);
+    terminal_writestring("\ntype something:\n");
+
+    serial_print("VGA buffer written, entering idle loop\n");
 
     while (1) {
         __asm__ volatile ("hlt");

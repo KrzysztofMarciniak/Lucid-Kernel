@@ -1,7 +1,7 @@
-thirdparty/
+.thirdparty/
 *.o
 *.bin
 *.iso
-isodir/
+.isodir/
 boot.o
-build/
+.build/
