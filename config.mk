@@ -4,4 +4,4 @@
 
 # Memory given to the emulated machine in QEMU. Later this also becomes
 # the amount our physical memory manager expects to have available.
-MEMORY_MB=256
+MEMORY_MB=8
