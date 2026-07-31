@@ -75,8 +75,6 @@ void kernel_main(void)
     terminal_write("\n");
     terminal_write("Boot complete.\n");
 
-    panic_ok("lucid: boot complete, all recipes up, halting.");
-
     for (;;) {
         __asm__ volatile ("hlt");
     }
