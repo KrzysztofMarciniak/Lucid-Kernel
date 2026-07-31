@@ -2,5 +2,6 @@ INIT_BOOT=terminal,gdt
 
 TERMINAL_IMPL=com1
 GDT_IMPL=flat
+KERNEL_PANIC_IMPL=simple
 
 MEMORY_MB=256
