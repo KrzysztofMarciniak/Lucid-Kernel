@@ -1,7 +1,7 @@
-# config.mk - project-wide settings, sourced by build.sh
-#
-# Plain KEY=VALUE lines (no spaces around '='), sourced as shell vars.
+INIT_BOOT=terminal,gdt,keyboard
 
-# Memory given to the emulated machine in QEMU. Later this also becomes
-# the amount our physical memory manager expects to have available.
-MEMORY_MB=8
+TERMINAL_IMPL=vga_text
+GDT_IMPL=flat
+KEYBOARD_IMPL=fast
+
+MEMORY_MB=256
