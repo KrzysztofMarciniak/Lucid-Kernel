@@ -51,8 +51,14 @@ static inline void gdt_flush(uint32_t gdt_ptr_addr) {
     );
 }
 
+void gdt_set_kernel_stack(uint32_t esp0) {
+    tss_set_kernel_stack(esp0);
+}
 lucid_status gdt_pre(void) {
-    return LUCID_OK;
+    return (lucid_status) {
+        .ok = 0,
+        .msg = "Global Descriptor Table validation"
+    };
 }
 
 lucid_status gdt_init(void) {
@@ -73,17 +79,21 @@ lucid_status gdt_init(void) {
         SEG_PRESENT | SEG_DPL3 | SEG_S_NORMAL | SEG_RW,
         GRAN_4K_32BIT); /* user data: 0x20 */
 
-    tss_install(5, SEL_KERNEL_DATA, 0); /* esp0=0 placeholder until stack allocator exists */
+    tss_install(5, SEL_KERNEL_DATA, 0);
 
-    return LUCID_OK;
+    return (lucid_status) {
+        .ok = 0,
+        .msg = "GDT table built (6 entries: null, kernel code, kernel data, user code, user data, TSS)"
+    };
 }
 
 lucid_status gdt_post(void) {
     gdt_flush((uint32_t)&gdtp);
-    tss_load(); /* must come after gdt_flush's lgdt, or ltr checks the wrong table */
-    return LUCID_OK;
+    tss_load();
+
+    return (lucid_status) {
+        .ok = 0,
+        .msg = "GDT loaded, segment registers reloaded, TSS installed"
+    };
 }
 
-void gdt_set_kernel_stack(uint32_t esp0) {
-    tss_set_kernel_stack(esp0);
-}

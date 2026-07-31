@@ -1,7 +1,6 @@
-INIT_BOOT=terminal,gdt,keyboard
+INIT_BOOT=terminal,gdt
 
-TERMINAL_IMPL=vga_text
+TERMINAL_IMPL=com1
 GDT_IMPL=flat
-KEYBOARD_IMPL=fast
 
 MEMORY_MB=256
