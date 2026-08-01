@@ -1,22 +1,18 @@
 #include "recipes/kernel_panic.h"
 
 lucid_status kernel_panic_pre(void) {
-    return (lucid_status) {
-        .ok = 0
-    };
+    return LUCID_OK;
 }
 
 lucid_status kernel_panic_init(void) {
-    return (lucid_status) {
-        .ok = -1,
-        .msg = "Kernel Panic Test Successful",
-        .debug = "Kernel Panic test debug message",
-        .hint = "Remove Kernel Panic from config.mk"
-    };
+    return LUCID_FAIL_EX(
+        1,
+        "Intentional kernel panic (test)",
+        "kernel_panic recipe requested panic",
+        "Remove 'kernel_panic' from config.mk to continue booting."
+    );
 }
 
 lucid_status kernel_panic_post(void) {
-    return (lucid_status) {
-        .ok = 0
-    };
+    return LUCID_OK;
 }
