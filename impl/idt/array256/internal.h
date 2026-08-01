@@ -22,12 +22,12 @@ struct idt_ptr {
 extern struct idt_entry idt[IDT_ENTRIES];
 extern struct idt_ptr   idtp;
 
-void idt_lidt(struct idt_ptr *p);
-void isr_stub_table_install(void);
-void isr_common_handler(uint32_t int_no);
-
 static inline void idt_lidt(struct idt_ptr *p) {
     __asm__ volatile ("lidt (%0)" : : "r"(p));
 }
+
+void isr_stub_table_install(void);
+void isr_common_handler(uint32_t int_no);
+void idt_set_gate(int n, uint32_t handler_addr);
 
 #endif

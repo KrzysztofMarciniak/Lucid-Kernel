@@ -1,9 +1,10 @@
-INIT_BOOT=terminal,gdt,idt,pic
+INIT_BOOT=terminal,gdt,idt,pic,timer
 
 TERMINAL_IMPL=com1
 GDT_IMPL=flat
 KERNEL_PANIC_IMPL=simple
 IDT_IMPL=array256
 PIC_IMPL=simple8259
+TIMER_IMPL=pit100hz
 
 MEMORY_MB=256

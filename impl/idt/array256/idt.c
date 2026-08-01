@@ -48,3 +48,7 @@ void isr_common_handler(uint32_t int_no) {
         "add a real handler once a recipe needs this interrupt"
     );
 }
+
+void idt_install_handler(int vector, void (*handler)(struct interrupt_frame *)) {
+    idt_set_gate(vector, (uint32_t)handler);
+}
