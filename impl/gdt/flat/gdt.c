@@ -55,45 +55,39 @@ void gdt_set_kernel_stack(uint32_t esp0) {
     tss_set_kernel_stack(esp0);
 }
 lucid_status gdt_pre(void) {
-    return (lucid_status) {
-        .ok = 0,
-        .msg = "Global Descriptor Table validation"
-    };
+    return LUCID_OK_MSG("Global Descriptor Table validation");
 }
 
 lucid_status gdt_init(void) {
     gdtp.limit = (sizeof(struct gdt_entry) * GDT_ENTRIES) - 1;
     gdtp.base  = (uint32_t)&gdt;
 
-    gdt_set_gate(0, 0, 0, 0, 0); /* null descriptor, required */
+    gdt_set_gate(0, 0, 0, 0, 0); /* null descriptor */
     gdt_set_gate(1, 0, 0xFFFFFFFF,
         SEG_PRESENT | SEG_DPL0 | SEG_S_NORMAL | SEG_EXEC | SEG_RW,
-        GRAN_4K_32BIT); /* kernel code: 0x08 */
+        GRAN_4K_32BIT); /* kernel code */
     gdt_set_gate(2, 0, 0xFFFFFFFF,
         SEG_PRESENT | SEG_DPL0 | SEG_S_NORMAL | SEG_RW,
-        GRAN_4K_32BIT); /* kernel data: 0x10 */
+        GRAN_4K_32BIT); /* kernel data */
     gdt_set_gate(3, 0, 0xFFFFFFFF,
         SEG_PRESENT | SEG_DPL3 | SEG_S_NORMAL | SEG_EXEC | SEG_RW,
-        GRAN_4K_32BIT); /* user code: 0x18 */
+        GRAN_4K_32BIT); /* user code */
     gdt_set_gate(4, 0, 0xFFFFFFFF,
         SEG_PRESENT | SEG_DPL3 | SEG_S_NORMAL | SEG_RW,
-        GRAN_4K_32BIT); /* user data: 0x20 */
+        GRAN_4K_32BIT); /* user data */
 
     tss_install(5, SEL_KERNEL_DATA, 0);
 
-    return (lucid_status) {
-        .ok = 0,
-        .msg = "GDT table built (6 entries: null, kernel code, kernel data, user code, user data, TSS)"
-    };
+    return LUCID_OK_MSG(
+        "GDT built (6 entries: null, kernel code, kernel data, user code, user data, TSS)"
+    );
 }
 
 lucid_status gdt_post(void) {
     gdt_flush((uint32_t)&gdtp);
     tss_load();
 
-    return (lucid_status) {
-        .ok = 0,
-        .msg = "GDT loaded, segment registers reloaded, TSS installed"
-    };
+    return LUCID_OK_MSG(
+        "GDT loaded, segment registers reloaded, TSS installed"
+    );
 }
-

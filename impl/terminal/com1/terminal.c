@@ -69,28 +69,22 @@ void terminal_write(const char *s)
         terminal_putc(*s++);
     }
 }
+
 lucid_status terminal_pre(void)
 {
-    return (lucid_status) {
-        .ok = 0,
-        .msg = "Initializing COM1 serial port"
-    };
+    return LUCID_OK_MSG("Initializing COM1 serial port");
 }
 
 lucid_status terminal_init(void)
 {
     serial_init();
 
-    return (lucid_status) {
-        .ok = 0,
-        .msg = "COM1 serial port initialized (115200 baud, 8 data bits, no parity, 1 stop bit)"
-    };
+    return LUCID_OK_MSG(
+        "COM1 serial port initialized (115200 baud, 8 data bits, no parity, 1 stop bit)"
+    );
 }
 
 lucid_status terminal_post(void)
 {
-    return (lucid_status) {
-        .ok = 0,
-        .msg = "COM1 serial port ready for output"
-    };
+    return LUCID_OK_MSG("COM1 serial port ready for output");
 }
