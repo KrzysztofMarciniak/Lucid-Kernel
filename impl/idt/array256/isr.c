@@ -2,8 +2,6 @@
 
 struct interrupt_frame;
 
-static void idt_set_gate(int n, uint32_t handler_addr);
-
 /* X-macro list of every vector 0..255, literal tokens only --
    arithmetic like ISR(base+0) breaks token-pasting, must be literal. */
 #define ISR_LIST(X) \
@@ -49,7 +47,7 @@ static void (*const isr_table[IDT_ENTRIES])(struct interrupt_frame *) = {
     ISR_LIST(ISR_REF)
 };
 
-static void idt_set_gate(int n, uint32_t handler_addr) {
+void idt_set_gate(int n, uint32_t handler_addr) {
     idt[n].offset_low  = handler_addr & 0xFFFF;
     idt[n].offset_high = (handler_addr >> 16) & 0xFFFF;
     idt[n].selector    = KERNEL_CODE_SELECTOR;

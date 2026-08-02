@@ -3,6 +3,8 @@
 
 #include "status.h"
 
+/* REQUIRES: gdt */
+
 struct interrupt_frame;
 
 lucid_status idt_pre(void);

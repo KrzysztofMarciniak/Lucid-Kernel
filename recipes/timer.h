@@ -3,6 +3,8 @@
 
 #include "status.h"
 
+/* REQUIRES: idt, pic */
+
 lucid_status timer_pre(void);
 lucid_status timer_init(void);
 lucid_status timer_post(void);
