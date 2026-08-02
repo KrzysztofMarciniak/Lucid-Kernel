@@ -8,7 +8,6 @@
 uint32_t heap_current = HEAP_START;
 uint32_t heap_mapped_end = HEAP_START;
 
-#define PAGE_SIZE 4096
 
 lucid_status heap_pre(void) {
     return LUCID_OK;
@@ -38,7 +37,7 @@ void *kmalloc(size_t size) {
         if (st.ok != 0) {
             panic_status(st);
         }
-        heap_mapped_end += PAGE_SIZE;
+        heap_mapped_end += VMM_PAGE_SIZE;
     }
 
     heap_current = needed_end;

@@ -2,8 +2,9 @@
 #define LUCID_IMPL_VMM_TWOLEVEL_INTERNAL_H
 
 #include <stdint.h>
+#include "recipes/vmm.h"
 
-#define PAGE_SIZE       4096
+#define PAGE_SIZE VMM_PAGE_SIZE
 #define PT_ENTRIES      1024
 #define PD_ENTRIES      1024
 

@@ -1,6 +1,8 @@
 #ifndef LUCID_RECIPE_VMM_H
 #define LUCID_RECIPE_VMM_H
 
+#define VMM_PAGE_SIZE 4096
+
 #include "status.h"
 #include <stdint.h>
 
