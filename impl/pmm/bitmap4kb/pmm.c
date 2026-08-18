@@ -38,7 +38,7 @@ lucid_status pmm_init(void) {
         bitmap_set(i);
     }
 
-    return LUCID_OK_MSG("PMM bitmap built, low 1MB reserved");
+    return LUCID_OK_MSG("PMM bitmap built, low 4MB reserved");
 }
 
 lucid_status pmm_post(void) {

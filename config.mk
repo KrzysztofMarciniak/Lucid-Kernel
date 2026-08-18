@@ -1,4 +1,4 @@
-INIT_BOOT=terminal,gdt,idt,pic,timer,pmm,vmm,heap,usermode
+INIT_BOOT=terminal,gdt,idt,pic,timer,pmm,vmm,heap,usermode,usermode_test
 
 TERMINAL_IMPL=com1
 GDT_IMPL=flat
@@ -11,5 +11,7 @@ VMM_IMPL=twolevel
 HEAP_IMPL=bumpheap
 KMALLOC_TEST_IMPL=basic
 USERMODE_IMPL=iret3
+USERMODE_TEST_IMPL=basic
 
 MEMORY_MB=256
+LOW_RESERVED_MB=4

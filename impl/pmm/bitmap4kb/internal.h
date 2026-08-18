@@ -9,13 +9,18 @@
 #define MEMORY_MB 256  /* fallback if config.mk didn't define it */
 #endif
 
+#ifndef LOW_RESERVED_MB
+#define LOW_RESERVED_MB 4  /* fallback if config.mk didn't define it */
+#endif
+
 #define TOTAL_FRAMES ((MEMORY_MB * 1024 * 1024) / FRAME_SIZE)
 #define BITMAP_SIZE  (TOTAL_FRAMES / 8)
 
-/* frames below this physical address are always reserved -- kernel
-   image, boot structures, low memory quirks. 1MB is a safe simple
-   cutoff for a 32-bit KISS kernel. */
-#define RESERVED_BELOW (1 * 1024 * 1024)
+/*
+ * Frames below this physical address are always reserved.
+ * This protects the bootstrap/kernel identity-mapped region.
+ */
+#define RESERVED_BELOW (LOW_RESERVED_MB * 1024 * 1024)
 
 extern uint8_t frame_bitmap[BITMAP_SIZE];
 

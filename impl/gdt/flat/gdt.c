@@ -82,12 +82,28 @@ lucid_status gdt_init(void) {
         "GDT built (6 entries: null, kernel code, kernel data, user code, user data, TSS)"
     );
 }
-
 lucid_status gdt_post(void) {
     gdt_flush((uint32_t)&gdtp);
     tss_load();
 
-    return LUCID_OK_MSG(
-        "GDT loaded, segment registers reloaded, TSS installed"
-    );
+    /* TEMP DEBUG: confirm actual gdtp values post-flush */
+    static char dbg[64];
+    const char *hex = "0123456789ABCDEF";
+    dbg[0] = 'L'; dbg[1] = '='; 
+    dbg[2] = hex[(gdtp.limit >> 12) & 0xF];
+    dbg[3] = hex[(gdtp.limit >> 8) & 0xF];
+    dbg[4] = hex[(gdtp.limit >> 4) & 0xF];
+    dbg[5] = hex[gdtp.limit & 0xF];
+    dbg[6] = ' '; dbg[7] = 'B'; dbg[8] = '=';
+    dbg[9]  = hex[(gdtp.base >> 28) & 0xF];
+    dbg[10] = hex[(gdtp.base >> 24) & 0xF];
+    dbg[11] = hex[(gdtp.base >> 20) & 0xF];
+    dbg[12] = hex[(gdtp.base >> 16) & 0xF];
+    dbg[13] = hex[(gdtp.base >> 12) & 0xF];
+    dbg[14] = hex[(gdtp.base >> 8) & 0xF];
+    dbg[15] = hex[(gdtp.base >> 4) & 0xF];
+    dbg[16] = hex[gdtp.base & 0xF];
+    dbg[17] = '\0';
+
+    return LUCID_OK_MSG(dbg);
 }

@@ -25,6 +25,7 @@ if [ -f "$SCRIPT_DIR/config.mk" ]; then
     . "$SCRIPT_DIR/config.mk"
 fi
 MEMORY_MB="${MEMORY_MB:-256}"
+LOW_RESERVED_MB="${LOW_RESERVED_MB:-4}"
 
 TCC_SRC_DIR="${TCC_SRC_DIR:-$SCRIPT_DIR/.thirdparty/src/tinycc}"
 
@@ -41,10 +42,11 @@ GRUB_URL="${GRUB_URL:-https://ftp.gnu.org/gnu/grub/grub-${GRUB_VERSION}.tar.gz}"
 PATH="$PREFIX/bin:$PATH"
 
 CC=tcc
+#CC=gcc
 AS=nasm
 LD=ld
 
-CFLAGS="-m32 -ffreestanding -nostdinc -I . -I include -Wall -Wextra -c"
+CFLAGS="-m32 -ffreestanding -nostdinc -I . -I include -DLOW_RESERVED_MB=${LOW_RESERVED_MB}  -Wall -Wextra -mno-sse -mno-sse2 -mgeneral-regs-only -c "
 ASFLAGS="-f elf32"
 LDFLAGS="-m elf_i386 -T linker.ld -nostdlib"
 
@@ -202,10 +204,11 @@ generate_init_table() {
 
     echo "[gen] $INIT_TABLE_C  (INIT_BOOT=$INIT_BOOT)" >&2
 
-    for name in $names; do
+
+for name in $names; do
         impl_dir="$(resolve_impl "$name")"
         echo "[recipe] $name -> $impl_dir" >&2
-        find "$impl_dir" -name '*.c' -type f
+        find "$impl_dir" \( -name '*.c' -o -name '*.asm' -o -name '*.s' \) -type f
     done
 }
 
@@ -241,9 +244,18 @@ for src in "$SRC_DIR"/*.s; do
     for src in $impl_srcs; do
         unset IFS
         [ -e "$src" ] || continue
-        obj="$(mangled_obj_path "$src")"
-        echo "[cc] $src"
-        "$CC" $CFLAGS "$src" -o "$obj"
+        case "$src" in
+            *.asm|*.s)
+                obj="$BUILD_DIR/$(echo "$src" | sed -e 's/\./_/g' -e 's/[\/]/_/g').o"
+                echo "[as] $src"
+                "$AS" $ASFLAGS "$src" -o "$obj"
+                ;;
+            *)
+                obj="$(mangled_obj_path "$src")"
+                echo "[cc] $src"
+                "$CC" $CFLAGS "$src" -o "$obj"
+                ;;
+        esac
         objs="$objs $obj"
         IFS='
 '
@@ -298,7 +310,16 @@ run() {
 test() {
     build
     echo "[test] booting headless, serial -> stdout (Ctrl-A X to quit)"
-    qemu-system-i386 -cdrom "$ISO" -boot d -m "${MEMORY_MB}M" -display none -serial stdio 
+	qemu-system-i386 \
+    -cdrom "$ISO" \
+    -boot d \
+    -m "${MEMORY_MB}M" \
+    -display none \
+    -serial stdio \
+    -no-reboot \
+    -no-shutdown \
+    -d int,cpu_reset,guest_errors \
+    -D qemu.log
 }
 
 ensure_gitignored() {
