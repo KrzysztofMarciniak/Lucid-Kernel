@@ -1,21 +1,33 @@
-#include "internal.h"
+#include <stdint.h>
+void usermode_drop(
+    uint32_t entry,
+    uint32_t stack,
+    uint32_t cs,
+    uint32_t ds
+)
+{
+    __asm__ volatile(
+        "cli\n"
 
-void usermode_drop(uint32_t entry, uint32_t user_stack, uint32_t code_sel, uint32_t data_sel) {
-    __asm__ volatile (
-        "mov %1, %%ax\n"
+        "mov %[ds], %%ax\n"
         "mov %%ax, %%ds\n"
         "mov %%ax, %%es\n"
-        "mov %%ax, %%fs\n"
-        "mov %%ax, %%gs\n"
 
-        "push %1\n"      /* ss */
-        "push %2\n"      /* esp */
-        "pushf\n"        /* eflags */
-        "push %0\n"      /* cs */
-        "push %3\n"      /* eip */
+        "push %[ds]\n"
+        "push %[stack]\n"
+        "push $0x202\n"
+        "push %[cs]\n"
+        "push %[entry]\n"
+
         "iret\n"
+
         :
-        : "r"(code_sel), "r"(data_sel), "r"(user_stack), "r"(entry)
-        : "eax", "memory"
+        :
+        [entry] "a"(entry),
+        [stack] "b"(stack),
+        [cs] "c"(cs),
+        [ds] "d"(ds)
+        :
+        "memory"
     );
 }
