@@ -9,9 +9,10 @@ void usermode_drop(
     __asm__ volatile(
         "cli\n"
 
-        "mov %[ds], %%ax\n"
-        "mov %%ax, %%ds\n"
-        "mov %%ax, %%es\n"
+        "push %[ds]\n"
+        "pop %%ds\n"
+        "push %[ds]\n"
+        "pop %%es\n"
 
         "push %[ds]\n"
         "push %[stack]\n"
