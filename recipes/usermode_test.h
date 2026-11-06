@@ -1,7 +1,7 @@
 #ifndef LUCID_RECIPE_USERMODE_TEST_H
 #define LUCID_RECIPE_USERMODE_TEST_H
 
-/* REQUIRES: usermode */
+/* REQUIRES: usermode, syscall */
 
 #include "status.h"
 

@@ -12,5 +12,8 @@ lucid_status pmm_post(void);
    reserved/never handed out) on allocation failure. */
 uint32_t pmm_alloc_frame(void);
 void pmm_free_frame(uint32_t addr);
+void pmm_get_stats(uint32_t *managed_frames,
+                   uint32_t *free_frames,
+                   uint32_t *reserved_frames);
 
 #endif

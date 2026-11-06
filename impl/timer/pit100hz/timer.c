@@ -12,6 +12,10 @@ void timer_tick_handler(void) {
     outb(0x20, 0x20); /* PIC EOI */
 }
 
+uint32_t timer_get_ticks(void) {
+    return timer_ticks;
+}
+
 lucid_status timer_pre(void) {
     return LUCID_OK;
 }

@@ -15,5 +15,6 @@ lucid_status idt_post(void);
    in iret and follow the same stack-frame convention as isr.s).
    callable by any recipe running after idt in INIT_BOOT order. */
 void idt_install_handler(int vector, uint32_t handler_addr);
+void idt_install_user_handler(int vector, uint32_t handler_addr);
 
 #endif

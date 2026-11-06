@@ -9,6 +9,9 @@
 #define VMM_PRESENT   0x1
 #define VMM_WRITABLE  0x2
 #define VMM_USER      0x4
+#define VMM_KERNEL    0x8
+
+typedef struct vmm_space vmm_space;
 
 lucid_status vmm_pre(void);
 lucid_status vmm_init(void);
@@ -31,5 +34,12 @@ lucid_status vmm_unmap(uint32_t virt);
 
 /* is virt currently mapped? if out_phys is non-NULL, fill it in */
 int vmm_check(uint32_t virt, uint32_t *out_phys);
+int vmm_check_user_writable(uint32_t virt);
+
+vmm_space *vmm_space_current(void);
+lucid_status vmm_space_clone_current(vmm_space **out);
+lucid_status vmm_space_activate(vmm_space *space);
+lucid_status vmm_space_clear_user(vmm_space *space);
+lucid_status vmm_space_destroy(vmm_space *space);
 
 #endif

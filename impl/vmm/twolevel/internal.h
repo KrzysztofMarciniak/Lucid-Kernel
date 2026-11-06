@@ -82,6 +82,10 @@ static inline int vmm_is_kernel_address(uint32_t virt)
  */
 static inline int vmm_validate_mapping(uint32_t virt, uint32_t flags)
 {
+    if (flags & VMM_KERNEL) {
+        return !(flags & VMM_USER);
+    }
+
     if (flags & VMM_USER) {
         if (!vmm_is_user_address(virt)) {
             return 0;

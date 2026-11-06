@@ -63,3 +63,17 @@ void pmm_free_frame(uint32_t addr) {
         bitmap_clear(frame);
     }
 }
+
+void pmm_get_stats(uint32_t *managed_frames,
+                   uint32_t *free_frames,
+                   uint32_t *reserved_frames) {
+    uint32_t free_count = 0;
+    for (uint32_t i = 0; i < TOTAL_FRAMES; i++) {
+        if (!bitmap_test(i)) free_count++;
+    }
+    if (managed_frames) *managed_frames = TOTAL_FRAMES;
+    if (free_frames) *free_frames = free_count;
+    if (reserved_frames) {
+        *reserved_frames = RESERVED_BELOW / FRAME_SIZE;
+    }
+}

@@ -9,8 +9,8 @@
 #define USER_CODE_SELECTOR (0x18 | 3) /* entry 3 * 8 = 0x18, RPL 3 */
 #define USER_DATA_SELECTOR (0x20 | 3) /* entry 4 * 8 = 0x20, RPL 3 */
 
-#define USER_STACK_TOP  0x00800000   /* 8MB */
-#define USER_STACK_SIZE 0x00001000   /* 4KB */
+#define USER_STACK_TOP  USERMODE_STACK_TOP
+#define USER_STACK_SIZE USERMODE_STACK_SIZE
 #define KERNEL_STACK_SIZE 4096
 
 void usermode_drop(uint32_t entry, uint32_t user_stack, uint32_t code_sel, uint32_t data_sel);

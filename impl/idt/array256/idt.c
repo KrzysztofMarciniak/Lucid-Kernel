@@ -78,3 +78,7 @@ void idt_install_handler(int vector, uint32_t handler_addr) {
     idt_set_gate(vector, handler_addr);
 }
 
+void idt_install_user_handler(int vector, uint32_t handler_addr) {
+    idt_set_gate(vector, handler_addr);
+    idt[vector].type_attr = 0xEE;
+}
