@@ -1,187 +1,143 @@
-````markdown
 # Clearsh
 
-Clearsh is the shell for Lucid Kernel.
+Clearsh is Lucid Kernel's foreground, ring-3 Lisp shell. Userland Pioneer
+starts it with `fork`/`exec` and waits for it to exit, then restarts it. It is
+available through both COM1 serial and the VGA text console. The filesystem is
+currently RAM-backed. When booted from the provided disk image it saves
+checksummed snapshots to the Lucid disk partition; without that partition,
+writes are volatile.
 
-It is a Lisp-based shell focused on filesystem manipulation.
+The prompt shows the current directory:
 
-The shell provides a small set of primitives. System functionality is exposed through files instead of dedicated commands.
+```text
+λ /users/root>
+```
 
----
+Use Left/Right/Home/End to edit the current line and Up/Down to browse the
+eight most recent commands; moving down past the newest command restores the
+unfinished draft. Ctrl+Left/Right move by words, treating whitespace and Lisp
+delimiters as boundaries. Ctrl+A/E move to the line start/end, Ctrl+U/K delete
+to the left/right, Ctrl+W deletes the previous word, and Ctrl+L redraws the
+screen. Tab completes Clearsh function names and unquoted paths inside
+`(file ...)`; a unique match is inserted, while multiple matches extend the
+common prefix and list candidates.
+Opening parentheses and quotes insert their matching closer; unmatched closers
+are completed when the line is submitted. Serial terminals may use ANSI
+Ctrl+Arrow sequences (for example, `ESC [ 1 ; 5 D` for Ctrl+Left).
 
-## Design
+## Expressions
 
-Clearsh is based on:
-
-- Lisp expressions
-- file-based system interfaces
-- small standard library
-- readable syntax
-
-The filesystem is the system API.
-
----
-
-## Syntax
-
-Clearsh uses prefix expressions.
+Clearsh evaluates one prefix expression per line:
 
 ```lisp
 (function argument ...)
-````
+```
 
-Example:
+Values include text, numbers, booleans, paths, files, lists, functions, and
+`nil`. A bare path token is relative to the current directory unless it starts
+with `/`. Quoted strings support `\n`, `\t`, `\"`, and `\\` escapes.
+
+## Files and directories
 
 ```lisp
-(print (text "Hello, World!\n"))
+(ls)
+(ls (file /system/info))
+(cd (file /system/info))
+(pwd)
+(print (read (file architecture)))
+(write (file /tmp/note) (text "hello\n"))
 ```
 
----
+`file` normalizes relative paths and `..`. `read` and `write` operate on files;
+`ls` lists a directory, `cd` changes the current directory, and `pwd` returns
+it. The filesystem includes `/system/info`, `/system/config/pioneer`,
+`/users/root`, and `/tmp`. It supports 64 entries, paths up to 255 characters,
+and files up to 4096 bytes. Disk-image boots preserve changes across reboots.
 
-## Files
+## Lists and lambdas
 
-Files are referenced using `file`.
+`map` applies a function to each list item, while `filter` keeps items whose
+result is truthy. Lambdas take one parameter and one expression. Both the
+Unicode `λ` symbol and the ASCII `lambda` spelling are accepted:
 
 ```lisp
-(file /path/to/file)
+(print (map (λ (item) (text item)) (list 1 "two")))
+(print (filter (lambda (item) (text item)) (list "" "keep")))
 ```
 
-Read a file:
+Built-in functions such as `text` can also be passed directly to `map` and
+`filter`.
+
+## Math and control
 
 ```lisp
-(read (file /system/info/cpu))
+(+ 2 (* 3 4))
+(/ 20 3)
+(pow 2 8)
+(if (> 5 2) "yes" "no")
+(and true (not false))
+(concat "Lucid " "Kernel")
+(length (list 1 2 3))
+(uptime)
 ```
 
-Write a file:
+Arithmetic uses signed 32-bit integers; division is integer division.
+Overflow and division by zero return errors. `if` evaluates only the selected
+branch. `(uptime)` returns seconds since boot.
+
+## System calls
+
+Clearsh offers a checked `(syscall number ...)` form. It accepts shell values
+and creates any user buffers internally, so scripts cannot pass raw pointers:
 
 ```lisp
-(write (file /tmp/test) (text "data"))
+(syscall 9)
+(syscall 0 (text "hello\n"))
+(syscall 3 (file /system/info/syscalls))
+(syscall 4 (file /users/root/note) (text "saved"))
 ```
 
----
+Numbers and argument shapes are listed in `/system/info/syscalls`. `SYS_EXIT`
+(number 1) is unavailable through this generic form; use `(exit [status])` to
+exit Clearsh and let Pioneer restart it. Unsupported syscall numbers or
+invalid argument types return an error.
+File and console I/O—including `read`, `write`, `ls`, `vi`, and `run`—uses
+syscalls. Math, logic, and list/lambda evaluation remain Clearsh intrinsics.
 
-## System Interface
-
-Kernel information is exposed through the filesystem.
-
-Example:
-
-```
-/system/
-    info/
-        cpu
-        memory
-        uptime
-
-    processes/
-
-    devices/
-
-    services/
-```
-
-Accessing processes:
+## Other functions
 
 ```lisp
-(read (file /system/processes))
+(print value)
+(text value)
+(list value ...)
+(run (file /users/root/start.clearsh))
+(vi (file /users/root/start.clearsh))
+(exit)
+(install)
+(shutdown)
+(help)
 ```
 
-Accessing CPU information:
+`(help)` prints concise syntax and examples, including where to read runtime
+system details and the syscall list (`/system/info/syscalls`). Syscalls are
+available through checked built-ins and the typed `(syscall number ...)` form;
+raw user pointers are never accepted.
 
-```lisp
-(read (file /system/info/cpu))
-```
+`vi` (also named `edit`) opens a small modal editor. In normal mode, use
+`i`/`a` to insert, `o`/`O` to open a line, `h`/`j`/`k`/`l` or arrows to move,
+`x` to delete, `u` to undo one edit, and `:w`, `:q`, `:wq`, or `:q!` to
+save/quit. The editor supports one 4096-byte buffer.
 
-No special commands are required.
+`(install)` explains how to build a bootable disk image with
+`./build.sh disk`; Clearsh does not yet partition or overwrite a physical disk.
+`(shutdown)` and `(poweroff)` request
+poweroff through the QEMU/Bochs legacy power ports.
 
----
-
-## Values
-
-Clearsh operates on values.
-
-Supported types:
-
-```
-text
-number
-boolean
-list
-file
-path
-error
-nil
-```
-
-Example:
-
-```lisp
-(text "hello")
-```
-
----
-
-## Built-in Functions
-
-Clearsh keeps the built-in function set minimal.
-
-Core functions:
-
-```lisp
-file
-read
-write
-print
-text
-list
-map
-filter
-```
-
----
-
-## Example
-
-```lisp
-(print
-    (read
-        (file /system/info/kernel)))
-```
-
-Output:
-
-```
-Lucid Kernel 0.0.1-pre
-```
-
----
-
-## Scripts
-
-Clearsh scripts are plain text files.
-
-Example:
-
-```lisp
-#!/bin/clearsh
-
-(print (read (file /system/info/kernel)))
-```
-
----
-
-## Goals
-
-Clearsh aims to provide:
-
-* readable shell syntax
-* direct system access
-* no command-specific interfaces
-* structured data instead of text parsing
-
-The shell is small.
-The filesystem provides the functionality.
-
-```
-```
-
+Pioneer reads `/system/config/pioneer/boot` before showing the prompt. Each
+nonblank line names a Clearsh script; relative paths resolve inside
+`/system/config/pioneer/`, absolute paths are accepted, and lines beginning
+with `#` are comments. Edit the list or scripts with `(vi (file ...))`.
+Scripts contain one expression per line; a leading `#!` line is ignored.
+Only the embedded Pioneer and Clearsh images are currently executable.
+There is no general executable loader, preemptive multitasking, or POSIX
+compatibility.
