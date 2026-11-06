@@ -14,6 +14,8 @@ A non-POSIX, KISS kernel. Everything is a file.
 - CPU: 2+ cores, 32-bit or above
 - RAM: 8 MB
 
+Lucid is confirmed working on the Lenovo ThinkPad X201.
+
 ## Size Budget
 
 - Kernel image: **max 1 MB**
@@ -24,7 +26,10 @@ ship until something else is cut or the design is simplified.
 
 ## Build Toolchain
 
-Built entirely local, no sudo, no system package dependencies:
+Toolchain components can be built locally without sudo. Run
+`./build.sh install-all` to bootstrap them; this requires Git, GCC, GNU Make,
+tar, curl or wget, Bison, and Flex on the host. Building the ISO also requires
+NASM, GNU ld, and Python 3.
 
 - **tcc** — C99 compiler
 - **python3** — build-time BDF font conversion
@@ -47,16 +52,63 @@ Eye terminal running Clearsh.
 ./build.sh disk             create a bootable 128 MiB BIOS disk image
 ./build.sh disk-run         create and boot that image in QEMU
 ./build.sh clean            remove build artifacts
-./build.sh install-tcc      build tcc      (local, no sudo, no system deps used)
-./build.sh install-xorriso  build xorriso  (local, no sudo, no system deps used)
-./build.sh install-mtools   build mtools   (local, no sudo, no system deps used)
-./build.sh install-grub     build grub     (local, no sudo, no system deps used)
+./build.sh install-tcc      build TCC locally
+./build.sh install-xorriso  build xorriso locally
+./build.sh install-mtools   build mtools locally
+./build.sh install-grub     build GRUB locally
 ./build.sh install-all      build all of the above, in dependency order
 make get-font               download the Curie bitmap font
 ```
 
-Run `make get-font` once before building. Lucid requests a 1024x768x32 GRUB
-framebuffer and renders console text with Curie's 6x12 regular BDF glyphs.
+### Compile and run
+
+From the repository root, fetch the font once and build the bootable ISO:
+
+```sh
+make get-font
+./build.sh
+```
+
+To try it in QEMU, run `./build.sh test` for a headless boot with serial output,
+or run `QEMU_DISPLAY=gtk ./build.sh run` for a graphical VM. If the bundled
+compiler and image tools are missing, `./build.sh install-all` builds local
+copies under `.thirdparty/local`.
+
+### Make a bootable USB
+
+Build `lucid.iso` as above, then identify the USB device and unmount any of its
+mounted partitions:
+
+```sh
+lsblk -o NAME,SIZE,MODEL,TRAN,MOUNTPOINTS
+```
+
+Unmount every mounted partition on the USB (repeat for each listed partition,
+replacing the example device name as needed):
+
+```sh
+sudo umount /dev/sdX1
+```
+
+Write the ISO to the whole device (replace `/dev/sdX` with the USB device,
+not a partition such as `/dev/sdX1`):
+
+```sh
+sudo dd if=lucid.iso of=/dev/sdX bs=4M status=progress conv=fsync
+sync
+```
+
+> **Warning:** This erases the selected device. Verify its name and size with
+> `lsblk` before running `dd`; choosing the wrong device can destroy your
+> computer's data.
+
+Safely eject the USB, connect it to the target computer, and select it from
+the boot menu (F12 on the ThinkPad X201). The ISO boots in legacy BIOS mode.
+It is a live image: files kept only in RAMFS are lost when the machine powers
+off.
+
+Lucid requests a 1024x768x32 GRUB framebuffer and renders console text with
+Curie's 6x12 regular BDF glyphs.
 If the bootloader cannot provide a compatible RGB framebuffer, output falls
 back to VGA text mode. The font's SIL Open Font License is included in the
 boot image.
