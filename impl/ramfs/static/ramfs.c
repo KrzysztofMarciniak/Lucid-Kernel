@@ -396,6 +396,65 @@ static ramfs_node *find_node(const char *path)
     return 0;
 }
 
+static void remove_node_at(size_t index)
+{
+    for (size_t i = index + 1; i < node_count; i++) {
+        nodes[i - 1] = nodes[i];
+    }
+    node_count--;
+    bytes_zero(&nodes[node_count], sizeof(nodes[node_count]));
+}
+
+static int is_legacy_help_page(const char *path)
+{
+    return string_equal(path, "/README.txt") ||
+           string_equal(path, "/help/README.txt") ||
+           string_equal(path, "/help/CLEARSH.txt") ||
+           string_equal(path, "/help/BRAIN.txt") ||
+           string_equal(path, "/help/SYSTEM.txt");
+}
+
+static void migrate_legacy_help_paths(void)
+{
+    static const char help_prefix[] = "/help/";
+    const size_t prefix_length = sizeof(help_prefix) - 1;
+
+    for (size_t i = 0; i < node_count;) {
+        ramfs_node *node = &nodes[i];
+        if (is_legacy_help_page(node->path)) {
+            remove_node_at(i);
+            continue;
+        }
+
+        size_t prefix_index = 0;
+        while (prefix_index < prefix_length &&
+               node->path[prefix_index] == help_prefix[prefix_index]) {
+            prefix_index++;
+        }
+        if (prefix_index == prefix_length) {
+            char relocated_path[RAMFS_PATH_MAX];
+            relocated_path[0] = '/';
+            string_copy(relocated_path + 1,
+                        node->path + prefix_length,
+                        sizeof(relocated_path) - 1);
+            if (find_node(relocated_path) ||
+                !parent_is_directory(relocated_path)) {
+                remove_node_at(i);
+                continue;
+            }
+            string_copy(node->path, relocated_path, sizeof(node->path));
+        }
+        i++;
+    }
+
+    for (size_t i = 0; i < node_count; i++) {
+        if (string_equal(nodes[i].path, "/help")) {
+            remove_node_at(i);
+            break;
+        }
+    }
+}
+
 static int add_node(const char *path, const char *data, size_t length, int directory)
 {
     if (node_count == RAMFS_MAX_NODES || length > RAMFS_FILE_MAX) {
@@ -445,7 +504,6 @@ lucid_status ramfs_init(void)
         int directory;
     } seeds[] = {
         { "/", 0, 0, 1 },
-        { "/help", 0, 0, 1 },
         { "/system", 0, 0, 1 },
         { "/system/info", 0, 0, 1 },
         { "/system/config", 0, 0, 1 },
@@ -456,53 +514,31 @@ lucid_status ramfs_init(void)
         { "/users", 0, 0, 1 },
         { "/users/root", 0, 0, 1 },
         { "/tmp", 0, 0, 1 },
-        { "/README.txt",
+        { "/README.TXT",
           "Lucid Kernel\n"
           "============\n"
           "Lucid is a compact, non-POSIX hobby operating system.\n"
           "Boot flow: Kernel -> Pioneer -> Brain -> Eye -> Clearsh.\n"
-          "You are at the Clearsh prompt. Try (help) or (ls (file /help)).\n"
-          "Read the built-in guide with:\n"
-          "  (print (read (file /help/README.txt)))\n"
-          "Other guides: /help/CLEARSH.txt, /help/BRAIN.txt, "
-          "/help/SYSTEM.txt\n"
+          "You are at the Clearsh prompt. Try (help) or (ls (file /)).\n"
+          "Read this guide with:\n"
+          "  (print (read (file /README.TXT)))\n"
+          "Other guides: /CLEARSH.TXT, /BRAIN.TXT, /SYSTEM.TXT\n"
           "Files in RAM are volatile unless booted with a Lucid disk image.\n",
           sizeof("Lucid Kernel\n"
                  "============\n"
                  "Lucid is a compact, non-POSIX hobby operating system.\n"
                  "Boot flow: Kernel -> Pioneer -> Brain -> Eye -> Clearsh.\n"
-                 "You are at the Clearsh prompt. Try (help) or (ls (file /help)).\n"
-                 "Read the built-in guide with:\n"
-                 "  (print (read (file /help/README.txt)))\n"
-                 "Other guides: /help/CLEARSH.txt, /help/BRAIN.txt, "
-                 "/help/SYSTEM.txt\n"
+                 "You are at the Clearsh prompt. Try (help) or (ls (file /)).\n"
+                 "Read this guide with:\n"
+                 "  (print (read (file /README.TXT)))\n"
+                 "Other guides: /CLEARSH.TXT, /BRAIN.TXT, /SYSTEM.TXT\n"
                  "Files in RAM are volatile unless booted with a Lucid disk image.\n") - 1,
           0 },
-        { "/help/README.txt",
-          "Lucid built-in help\n"
-          "===================\n"
-          "Read this file with (print (read (file /help/README.txt))).\n"
-          "Read another guide by replacing its path in that expression.\n"
-          "  /help/CLEARSH.txt  Clearsh commands and keyboard input\n"
-          "  /help/BRAIN.txt    Brain windows, desktops, and status bar\n"
-          "  /help/SYSTEM.txt   System paths, syscalls, and storage\n"
-          "Use (ls (file /system/info)) for live system information.\n"
-          "Use (help) for a short command and syntax summary.\n",
-          sizeof("Lucid built-in help\n"
-                 "===================\n"
-                 "Read this file with (print (read (file /help/README.txt))).\n"
-                 "Read another guide by replacing its path in that expression.\n"
-                 "  /help/CLEARSH.txt  Clearsh commands and keyboard input\n"
-                 "  /help/BRAIN.txt    Brain windows, desktops, and status bar\n"
-                 "  /help/SYSTEM.txt   System paths, syscalls, and storage\n"
-                 "Use (ls (file /system/info)) for live system information.\n"
-                 "Use (help) for a short command and syntax summary.\n") - 1,
-          0 },
-        { "/help/CLEARSH.txt",
+        { "/CLEARSH.TXT",
           "Clearsh guide\n"
           "=============\n"
           "Clearsh evaluates one Lisp expression per input line.\n"
-          "  (ls (file /help))\n"
+          "  (ls (file /))\n"
           "  (print (read (file /system/info/name)))\n"
           "  (write (file /users/root/note) (text \"hello\\n\"))\n"
           "Use (pwd), (cd (file /path)), (vi (file /path)), (run (file /path)),\n"
@@ -516,7 +552,7 @@ lucid_status ramfs_init(void)
           sizeof("Clearsh guide\n"
                  "=============\n"
                  "Clearsh evaluates one Lisp expression per input line.\n"
-                 "  (ls (file /help))\n"
+                 "  (ls (file /))\n"
                  "  (print (read (file /system/info/name)))\n"
                  "  (write (file /users/root/note) (text \"hello\\n\"))\n"
                  "Use (pwd), (cd (file /path)), (vi (file /path)), (run (file /path)),\n"
@@ -528,7 +564,7 @@ lucid_status ramfs_init(void)
                  "  (write (file /system/config/clearsh/zoom) (text \"2\"))\n"
                  "Zoom values are 1-4; VGA text mode stays at native size.\n") - 1,
           0 },
-        { "/help/BRAIN.txt",
+        { "/BRAIN.TXT",
           "Brain window manager\n"
           "====================\n"
           "Brain manages Eye terminal windows. Mod is either Alt key.\n"
@@ -558,7 +594,7 @@ lucid_status ramfs_init(void)
                  "  (write (file /system/config/brain.conf) (text \"bar=left\\n\"))\n"
                  "Valid positions: top, bottom, left, right. Changes apply when written.\n") - 1,
           0 },
-        { "/help/SYSTEM.txt",
+        { "/SYSTEM.TXT",
           "System guide\n"
           "============\n"
           "Runtime information is under /system/info:\n"
@@ -661,6 +697,7 @@ lucid_status ramfs_init(void)
     if (partition > 0) {
         int loaded = load_persistent_nodes();
         if (loaded > 0) {
+            migrate_legacy_help_paths();
             for (size_t i = 0; i < sizeof(seeds) / sizeof(seeds[0]); i++) {
                 if (!find_node(seeds[i].path) &&
                     parent_is_directory(seeds[i].path)) {
@@ -669,6 +706,14 @@ lucid_status ramfs_init(void)
                         break;
                     }
                 }
+            }
+            if (!valid_nodes(node_count)) {
+                return LUCID_FAIL_EX(
+                    1,
+                    "Persistent filesystem migration failed",
+                    "the root-level help paths are invalid",
+                    "check the saved filesystem paths"
+                );
             }
             return LUCID_OK_MSG("Persistent filesystem loaded from disk");
         }

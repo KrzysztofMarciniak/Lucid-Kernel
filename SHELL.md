@@ -59,11 +59,11 @@ with `/`. Quoted strings support `\n`, `\t`, `\"`, and `\\` escapes.
 `file` normalizes relative paths and `..`. `read` and `write` operate on files;
 `ls` lists a directory, `cd` changes the current directory, and `pwd` returns
 it. The filesystem includes `/system/info`, `/system/config/clearsh`,
-`/system/config/pioneer`, `/users/root`, `/tmp`, `/README.txt`, and `/help`.
-Read the guide index with
-`(print (read (file /help/README.txt)))`. It supports 64 entries, paths up to
-255 characters, and files up to 4096 bytes. Disk-image boots preserve changes
-across reboots.
+`/system/config/pioneer`, `/users/root`, `/tmp`, and the root-level guides
+`/README.TXT`, `/CLEARSH.TXT`, `/BRAIN.TXT`, and `/SYSTEM.TXT`. Read the guide
+index with `(print (read (file /README.TXT)))`. It supports 64 entries, paths
+up to 255 characters, and files up to 4096 bytes. Disk-image boots preserve
+changes across reboots.
 
 ## Lists and lambdas
 

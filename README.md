@@ -204,8 +204,8 @@ framebuffer zoom with
 position is highlighted, and `vi` redraws only changed screen spans, avoiding
 full-screen redraws on keystrokes. Boot output is preserved after the initial
 banner, and the terminal halts while waiting for input instead of
-busy-spinning. Built-in runtime guides are available at `/README.txt` and
-under `/help`.
+busy-spinning. Built-in runtime guides are available in the RAMFS root:
+`/README.TXT`, `/CLEARSH.TXT`, `/BRAIN.TXT`, and `/SYSTEM.TXT`.
 Poweroff uses ACPI S5 when firmware provides it, with QEMU/Bochs legacy-port
 fallback; shutting down a QEMU guest exits QEMU but leaves the host running.
 
