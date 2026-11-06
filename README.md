@@ -82,6 +82,23 @@ text-mode dimensions instead of assuming a graphical framebuffer. Use
 and image tools are missing, `./build.sh install-all` builds local copies under
 `.thirdparty/local`.
 
+### Build configuration
+
+`build.sh` reads its build settings from [`config.mk`](config.mk). The main
+settings are:
+
+| Setting | Meaning |
+|---|---|
+| `INIT_BOOT` | Comma-separated list of boot recipes. Order matters: the build checks that each recipe's dependencies appear earlier in the list. |
+| `<RECIPE>_IMPL` | Selects the implementation directory for a recipe; for example, `TIMER_IMPL=pit250hz` selects `impl/timer/pit250hz`. The selected directory must exist. |
+| `MEMORY_MB` | RAM assigned to QEMU and the physical-memory range managed by the kernel's frame allocator. The allocator assumes this range is contiguous and does not yet read the firmware memory map. |
+| `LOW_RESERVED_MB` | Physical memory below this many MiB is reserved and never allocated; the default is 4 MiB. Use `1 <= LOW_RESERVED_MB < MEMORY_MB`. |
+| `*_TEST_IMPL` | Test implementation selectors currently present in `config.mk`; `build.sh` does not use them in the normal build. |
+
+For example, set `MEMORY_MB=512` to give QEMU 512 MiB and configure the
+allocator for the same range. After changing `config.mk`, run `./build.sh` to
+rebuild the kernel and ISO. The size-budget checks still apply.
+
 ### Use syscalls
 
 The easiest way to try a syscall in Clearsh is through its virtual syscall

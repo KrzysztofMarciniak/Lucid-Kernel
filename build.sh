@@ -71,7 +71,7 @@ fi
 AS=nasm
 LD=ld
 
-CFLAGS="-m32 -ffreestanding -nostdinc -I . -I include -DLOW_RESERVED_MB=${LOW_RESERVED_MB}  -Wall -Wextra -mno-sse -mno-sse2 -mgeneral-regs-only -c "
+CFLAGS="-m32 -ffreestanding -nostdinc -I . -I include -DMEMORY_MB=${MEMORY_MB} -DLOW_RESERVED_MB=${LOW_RESERVED_MB}  -Wall -Wextra -mno-sse -mno-sse2 -mgeneral-regs-only -c "
 ASFLAGS="-f elf32"
 if [ "$LUCID_TEXT_MODE" = "1" ]; then
     ASFLAGS="$ASFLAGS -DLUCID_TEXT_MODE"
