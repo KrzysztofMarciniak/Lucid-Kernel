@@ -2,14 +2,18 @@
 # build.sh - build and run myos
 # Usage:
 #   ./build.sh                  build only
-#   ./build.sh run              build + boot in QEMU (graphical window)
+#   ./build.sh run              build + boot in QEMU (serial output in terminal)
 #   ./build.sh test             build + boot headless, serial output to stdout
+#   ./build.sh disk             create a bootable 128 MiB BIOS disk image
+#   ./build.sh disk-run         create and boot the disk image in QEMU
 #   ./build.sh clean            remove build artifacts
 #   ./build.sh install-tcc      build tcc      (local, no sudo, no system deps used)
 #   ./build.sh install-xorriso  build xorriso  (local, no sudo, no system deps used)
 #   ./build.sh install-mtools   build mtools   (local, no sudo, no system deps used)
 #   ./build.sh install-grub     build grub     (local, no sudo, no system deps used)
 #   ./build.sh install-all      build all of the above, in dependency order
+#   make get-font              download the Curie bitmap font
+#   LUCID_TEXT_MODE=1          boot through VGA text mode for font diagnostics
 #
 # All install-* targets build into .thirdparty/local and NEVER use anything
 # already on the system, even if a system copy exists -- this keeps the
@@ -26,6 +30,15 @@ if [ -f "$SCRIPT_DIR/config.mk" ]; then
 fi
 MEMORY_MB="${MEMORY_MB:-256}"
 LOW_RESERVED_MB="${LOW_RESERVED_MB:-4}"
+LUCID_TEXT_MODE="${LUCID_TEXT_MODE:-0}"
+
+case "$LUCID_TEXT_MODE" in
+    0|1) ;;
+    *)
+        echo "ERROR: LUCID_TEXT_MODE must be 0 or 1" >&2
+        exit 1
+        ;;
+esac
 
 TCC_SRC_DIR="${TCC_SRC_DIR:-$SCRIPT_DIR/.thirdparty/src/tinycc}"
 
@@ -41,13 +54,23 @@ GRUB_URL="${GRUB_URL:-https://ftp.gnu.org/gnu/grub/grub-${GRUB_VERSION}.tar.gz}"
 # Prefer anything we've built locally over system tools.
 PATH="$PREFIX/bin:$PATH"
 
-CC=tcc
+CC="${CC:-tcc}"
+if [ "$CC" = tcc ]; then
+    if [ -x "$PREFIX/bin/tcc" ]; then
+        CC="$PREFIX/bin/tcc"
+    elif [ -x "$TCC_SRC_DIR/tcc" ] && [ -x "$TCC_SRC_DIR/i386-tcc" ]; then
+        CC="$TCC_SRC_DIR/tcc"
+    fi
+fi
 #CC=gcc
 AS=nasm
 LD=ld
 
 CFLAGS="-m32 -ffreestanding -nostdinc -I . -I include -DLOW_RESERVED_MB=${LOW_RESERVED_MB}  -Wall -Wextra -mno-sse -mno-sse2 -mgeneral-regs-only -c "
 ASFLAGS="-f elf32"
+if [ "$LUCID_TEXT_MODE" = "1" ]; then
+    ASFLAGS="$ASFLAGS -DLUCID_TEXT_MODE"
+fi
 LDFLAGS="-m elf_i386 -T linker.ld -nostdlib"
 
 SRC_DIR=src
@@ -57,6 +80,8 @@ BUILD_DIR=.build
 ISODIR=.isodir
 ISO=lucid.iso
 BIN=lucid.bin
+DISK_IMAGE="$SCRIPT_DIR/lucid-disk.img"
+FONT_DIR="$SCRIPT_DIR/.thirdparty/font/curie"
 INIT_TABLE_C="$BUILD_DIR/init_table.c"
 
 # mangled_obj_path <src-file> -> unique .o path under BUILD_DIR
@@ -101,7 +126,7 @@ check_size() {
 }
 
 clean() {
-    rm -rf "$BUILD_DIR" "$BIN" "$ISO" "$ISODIR"
+    rm -rf "$BUILD_DIR" "$BIN" "$ISO" "$DISK_IMAGE" "$ISODIR"
     echo "cleaned"
 }
 
@@ -216,6 +241,49 @@ build() {
     mkdir -p "$BUILD_DIR"
     objs=""
 
+    font_bdf="$FONT_DIR/regular/curieMedium-12.bdf"
+    if [ ! -f "$font_bdf" ] || [ ! -f "$FONT_DIR/LICENSE" ]; then
+        echo "ERROR: Curie font is missing; run 'make get-font' first" >&2
+        exit 1
+    fi
+    command -v python3 >/dev/null 2>&1 || {
+        echo "ERROR: python3 is required to convert the Curie BDF font" >&2
+        exit 1
+    }
+    echo "[font] generating Curie bitmap table"
+    python3 "$SCRIPT_DIR/tools/bdf_to_c.py" \
+        "$font_bdf" "$BUILD_DIR/curie_font.c"
+    "$CC" $CFLAGS "$BUILD_DIR/curie_font.c" -o "$BUILD_DIR/curie_font.o"
+    objs="$objs $BUILD_DIR/curie_font.o"
+
+    if echo ",${INIT_BOOT:-}," | grep -q ",usermode,"; then
+        for app in pioneer clearsh; do
+            app_dir="$SCRIPT_DIR/userland/$app"
+            app_objs=""
+            for src in "$app_dir"/*.c; do
+                obj="$BUILD_DIR/${app}_user_$(basename "$src" .c).o"
+                echo "[cc] $src (user image)"
+                "$CC" $CFLAGS -DLUCID_USER "$src" -o "$obj"
+                app_objs="$app_objs $obj"
+            done
+            "$CC" $CFLAGS "$SRC_DIR/string.c" \
+                -o "$BUILD_DIR/${app}_string.o"
+            "$LD" -m elf_i386 -T "$app_dir/user.ld" --oformat binary \
+                -o "$BUILD_DIR/$app.bin" \
+                $app_objs "$BUILD_DIR/${app}_string.o"
+            app_size="$(file_size "$BUILD_DIR/$app.bin")"
+            if [ "$app_size" -gt 65536 ]; then
+                echo "ERROR: $app user image exceeds 64 KiB" >&2
+                exit 1
+            fi
+            echo "[size] $app user image: $(human_bytes "$app_size") / 64.00 KiB"
+            echo "[as] $app_dir/${app}_image.asm (embedded user image)"
+            "$AS" $ASFLAGS "$app_dir/${app}_image.asm" \
+                -o "$BUILD_DIR/${app}_image.o"
+            objs="$objs $BUILD_DIR/${app}_image.o"
+        done
+    fi
+
     echo "[as] boot.s"
     "$AS" $ASFLAGS boot.s -o "$BUILD_DIR/boot.o"
     objs="$objs $BUILD_DIR/boot.o"
@@ -280,27 +348,177 @@ for src in "$SRC_DIR"/*.s; do
 
     echo "[iso] packaging $ISO"
     mkdir -p "$ISODIR/boot/grub"
+    grub_modules_dir="$PREFIX/lib/grub"
+    if [ ! -f "$grub_modules_dir/i386-pc/vbe.mod" ]; then
+        grub_modules_dir=/usr/lib/grub
+    fi
+    if [ ! -f "$grub_modules_dir/i386-pc/vbe.mod" ]; then
+        echo "ERROR: GRUB BIOS VBE module was not found" >&2
+        exit 1
+    fi
+    mkdir -p "$ISODIR/boot/grub/i386-pc"
+    cp "$grub_modules_dir/i386-pc/vbe.mod" \
+        "$ISODIR/boot/grub/i386-pc/vbe.mod"
     cp "$BIN" "$ISODIR/boot/$BIN"
     cat > "$ISODIR/boot/grub/grub.cfg" << EOF
 set timeout=0
 set default=0
+terminal_output console
 
 menuentry "Lucid Kernel" {
+    if [ "$LUCID_TEXT_MODE" != "1" ]; then
+        insmod all_video
+        if [ "$grub_platform" = "pc" ]; then
+            insmod vbe
+        fi
+        set gfxmode=1024x768x32
+        set gfxpayload=1024x768x32
+        insmod gfxterm
+        terminal_output gfxterm
+    else
+        set gfxpayload=text
+    fi
     multiboot /boot/$BIN
 }
 EOF
-    grub-mkrescue -o "$ISO" "$ISODIR"
+    cp "$FONT_DIR/LICENSE" "$ISODIR/boot/curie-font-LICENSE.txt"
+    # Keep the hybrid image small while including GRUB's menu loader and the
+    # commands needed to read the config and launch a Multiboot kernel.
+    grub-mkrescue \
+        --install-modules="normal configfile multiboot terminal video all_video gfxterm test" \
+        --modules="normal configfile multiboot terminal video all_video gfxterm test" \
+        --core-compress=xz -o "$ISO" "$ISODIR"
 
     check_size "iso ($ISO)" "$ISO" "$MAX_ISO_BYTES"
 
     echo "build ok -> $ISO"
 }
 
-QEMU_DISPLAY="${QEMU_DISPLAY:-sdl}"
+build_disk_image() {
+    build
+    for tool in sfdisk mkfs.fat mmd mcopy grub-mkimage dd; do
+        command -v "$tool" >/dev/null 2>&1 || {
+            echo "ERROR: disk image creation requires '$tool'" >&2
+            exit 1
+        }
+    done
+
+    grub_bios_setup="$PREFIX/sbin/grub-bios-setup"
+    if [ ! -x "$grub_bios_setup" ]; then
+        grub_bios_setup="$(command -v grub-bios-setup || true)"
+    fi
+    if [ -z "$grub_bios_setup" ] || [ ! -x "$grub_bios_setup" ]; then
+        echo "ERROR: disk image creation requires grub-bios-setup" >&2
+        exit 1
+    fi
+
+    grub_platform_dir="$PREFIX/lib/grub/i386-pc"
+    if [ ! -f "$grub_platform_dir/boot.img" ]; then
+        grub_platform_dir=/usr/lib/grub/i386-pc
+    fi
+    if [ ! -f "$grub_platform_dir/boot.img" ]; then
+        echo "ERROR: GRUB i386-pc BIOS modules were not found" >&2
+        exit 1
+    fi
+
+    disk_size_mb="${LUCID_DISK_SIZE_MB:-128}"
+    case "$disk_size_mb" in
+        ''|*[!0-9]*)
+            echo "ERROR: LUCID_DISK_SIZE_MB must be a positive integer" >&2
+            exit 1
+            ;;
+    esac
+    total_sectors=$((disk_size_mb * 2048))
+    data_start=133120
+    if [ "$total_sectors" -le "$data_start" ]; then
+        echo "ERROR: disk image must be larger than 65 MiB" >&2
+        exit 1
+    fi
+
+    stage="$BUILD_DIR/disk-stage"
+    grub_stage="$stage/grub"
+    mkdir -p "$stage/boot/grub" "$grub_stage"
+    cp "$BIN" "$stage/boot/lucid.bin"
+    cat > "$stage/boot/grub/grub.cfg" << EOF
+set timeout=0
+set default=0
+set root=(hd0,msdos1)
+terminal_input console
+terminal_output console
+
+menuentry "Lucid Kernel" {
+    if [ "$LUCID_TEXT_MODE" != "1" ]; then
+        insmod all_video
+        if [ "$grub_platform" = "pc" ]; then
+            insmod vbe
+        fi
+        set gfxmode=1024x768x32
+        set gfxpayload=1024x768x32
+        insmod gfxterm
+        terminal_output gfxterm
+    else
+        set gfxpayload=text
+    fi
+    multiboot /boot/lucid.bin
+}
+EOF
+
+    truncate -s 0 "$DISK_IMAGE"
+    truncate -s "${disk_size_mb}M" "$DISK_IMAGE"
+    printf 'label: dos\nunit: sectors\n\nstart=2048, size=131072, type=0c, bootable\nstart=%s, size=%s, type=da\n' \
+        "$data_start" "$((total_sectors - data_start))" |
+        sfdisk "$DISK_IMAGE" >/dev/null
+    fat_image="$stage/boot-fat.img"
+    rm -f "$fat_image"
+    mkfs.fat -C -F 32 -h 2048 -n LUCID "$fat_image" 65536 >/dev/null
+    dd if="$fat_image" of="$DISK_IMAGE" bs=512 seek=2048 \
+        conv=notrunc status=none
+
+    fat_offset=$((2048 * 512))
+    mmd -i "$DISK_IMAGE@@$fat_offset" ::/boot
+    mmd -i "$DISK_IMAGE@@$fat_offset" ::/boot/grub
+    mcopy -i "$DISK_IMAGE@@$fat_offset" \
+        "$stage/boot/lucid.bin" ::/boot/lucid.bin
+    mcopy -i "$DISK_IMAGE@@$fat_offset" \
+        "$stage/boot/grub/grub.cfg" ::/boot/grub/grub.cfg
+    mcopy -i "$DISK_IMAGE@@$fat_offset" \
+        "$FONT_DIR/LICENSE" ::/boot/curie-font-LICENSE.txt
+
+    grub-mkimage \
+        --directory="$grub_platform_dir" \
+        --format=i386-pc \
+        --prefix='(hd0,msdos1)/boot/grub' \
+        --output="$grub_stage/core.img" \
+        biosdisk part_msdos fat normal configfile multiboot terminal video all_video vbe gfxterm vga_text at_keyboard
+    cp "$grub_platform_dir/boot.img" "$grub_stage/boot.img"
+    printf '(hd0) %s\n' "$DISK_IMAGE" > "$grub_stage/device.map"
+    "$grub_bios_setup" \
+        --directory="$grub_stage" \
+        --boot-image=boot.img \
+        --core-image=core.img \
+        --device-map="$grub_stage/device.map" \
+        --force "$DISK_IMAGE"
+
+    echo "disk image ready -> $DISK_IMAGE"
+    echo "BIOS MBR: GRUB; partition 1: boot files; partition 2: persistent LucidFS"
+}
+
+QEMU_DISPLAY="${QEMU_DISPLAY:-none}"
+
+run_qemu() {
+    if command -v qemu-system-i386 >/dev/null 2>&1; then
+        qemu-system-i386 "$@"
+    elif command -v qemu-system-x86_64 >/dev/null 2>&1; then
+        qemu-system-x86_64 "$@"
+    else
+        echo "ERROR: QEMU not found (on Alpine, install with: apk add qemu-system-x86_64)" >&2
+        exit 1
+    fi
+}
 
 run() {
     build
-    qemu-system-i386 -cdrom "$ISO" -boot d -display "$QEMU_DISPLAY" -vga std -m "${MEMORY_MB}M"
+    run_qemu -cdrom "$ISO" -boot d -display "$QEMU_DISPLAY" -serial stdio -m "${MEMORY_MB}M"
 }
 
 # Headless boot with serial routed to stdout -- no window, no display
@@ -310,7 +528,7 @@ run() {
 test() {
     build
     echo "[test] booting headless, serial -> stdout (Ctrl-A X to quit)"
-	qemu-system-i386 \
+	run_qemu \
     -cdrom "$ISO" \
     -boot d \
     -m "${MEMORY_MB}M" \
@@ -320,6 +538,22 @@ test() {
     -no-shutdown \
     -d int,cpu_reset,guest_errors \
     -D qemu.log
+}
+
+disk() {
+    build_disk_image
+}
+
+disk_run() {
+    build_disk_image
+    run_qemu \
+        -drive "file=$DISK_IMAGE,format=raw,if=ide" \
+        -boot c \
+        -m "${MEMORY_MB}M" \
+        -display "$QEMU_DISPLAY" \
+        -serial stdio \
+        -monitor none \
+        -no-reboot
 }
 
 ensure_gitignored() {
@@ -547,18 +781,46 @@ install_all() {
     echo "[install-all] done. .thirdparty/local/bin now has a fully self-contained toolchain."
 }
 
+get_font() {
+    font_bdf="$FONT_DIR/regular/curieMedium-12.bdf"
+    if [ -f "$font_bdf" ] && [ -f "$FONT_DIR/LICENSE" ]; then
+        echo "[get-font] Curie font already available at $FONT_DIR"
+        return
+    fi
+
+    if [ -e "$FONT_DIR" ]; then
+        echo "ERROR: incomplete font directory at $FONT_DIR; resolve it before retrying" >&2
+        exit 1
+    fi
+    command -v git >/dev/null 2>&1 || {
+        echo "ERROR: git is required to download the Curie font" >&2
+        exit 1
+    }
+    mkdir -p "$(dirname "$FONT_DIR")"
+    echo "[get-font] downloading Curie from oppiliappan/curie"
+    git clone --depth 1 https://github.com/oppiliappan/curie.git "$FONT_DIR"
+    if [ ! -f "$font_bdf" ] || [ ! -f "$FONT_DIR/LICENSE" ]; then
+        echo "ERROR: downloaded Curie repository is missing the expected BDF font or license" >&2
+        exit 1
+    fi
+    echo "[get-font] installed Curie regular 12px BDF and OFL license"
+}
+
 case "$1" in
     clean)           clean ;;
     run)             run ;;
     test)            test ;;
+    disk)            disk ;;
+    disk-run)        disk_run ;;
     install-tcc)     install_tcc ;;
     install-xorriso) install_xorriso ;;
     install-mtools)  install_mtools ;;
     install-grub)    install_grub ;;
     install-all)     install_all ;;
+    get-font)        get_font ;;
     "")              build ;;
     *)
-        echo "usage: $0 [run|test|clean|install-tcc|install-xorriso|install-mtools|install-grub|install-all]" >&2
+        echo "usage: $0 [run|test|disk|disk-run|clean|install-tcc|install-xorriso|install-mtools|install-grub|install-all|get-font]" >&2
         exit 1
         ;;
 esac

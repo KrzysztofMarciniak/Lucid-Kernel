@@ -7,6 +7,8 @@
 #include "init_table.h"
 #include "panic.h"
 #include "recipes/terminal.h"
+#include "recipes/init.h"
+#include "multiboot.h"
 
 static void banner(void)
 {
@@ -38,10 +40,17 @@ static void report(const char *recipe,
     terminal_write("\n");
 }
 
-void kernel_main(void)
+void kernel_main(uint32_t boot_magic, uint32_t multiboot_info_addr)
 {
     unsigned int i;
 
+    if (boot_magic == MULTIBOOT_BOOTLOADER_MAGIC) {
+        terminal_set_boot_info(
+            (const multiboot_info *)multiboot_info_addr
+        );
+    }
+
+    terminal_clear();
     banner();
 
     phase("PRE");
@@ -75,7 +84,5 @@ void kernel_main(void)
     terminal_write("\n");
     terminal_write("Boot complete.\n");
 
-    for (;;) {
-        __asm__ volatile ("hlt");
-    }
+    init_run();
 }

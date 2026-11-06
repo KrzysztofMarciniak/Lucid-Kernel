@@ -2,6 +2,8 @@
 *.o
 *.bin
 *.iso
+lucid-disk.img
+qemu.log
 .isodir/
 boot.o
 .build/
