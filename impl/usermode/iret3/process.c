@@ -1,12 +1,15 @@
 #include "panic.h"
 #include "recipes/gdt.h"
 #include "recipes/syscall.h"
+#include "recipes/terminal.h"
 #include "recipes/usermode.h"
 #include "recipes/vmm.h"
 #include "userland_image.h"
 
-#define PROCESS_LIMIT 8
+#define PROCESS_LIMIT (USERMODE_PROCESS_SLOTS - 1)
 #define PROCESS_KERNEL_STACK_SIZE 4096
+#define PROCESS_INPUT_QUEUE_SIZE 64
+#define DESKTOP_COUNT 10
 
 typedef enum {
     PROCESS_UNUSED,
@@ -22,11 +25,18 @@ struct process {
     int in_use;
     uint32_t pid;
     uint32_t exit_status;
+    uint32_t wait_pid;
     process_state state;
+    int waiting_input;
+    int reap_on_switch;
+    int is_window;
+    int is_manager;
+    uint32_t desktop;
     process *parent;
     const char *name;
     vmm_space *space;
     usermode_frame frame;
+    uint32_t *saved_stack;
     uint32_t kernel_stack_top;
     uint32_t return_esp;
     uint8_t kernel_stack[PROCESS_KERNEL_STACK_SIZE]
@@ -37,6 +47,15 @@ static process process_table[PROCESS_LIMIT];
 static process root_process;
 static process *current_process;
 static uint32_t next_pid = 2;
+static uint32_t input_queue[USERMODE_PROCESS_SLOTS][PROCESS_INPUT_QUEUE_SIZE];
+static uint32_t input_queue_head[USERMODE_PROCESS_SLOTS];
+static uint32_t input_queue_tail[USERMODE_PROCESS_SLOTS];
+static uint32_t focused_slot;
+static uint32_t window_manager_slot;
+static uint32_t current_desktop = 1;
+static uint32_t master_ratio = 60;
+
+static process *process_at_slot(uint32_t slot);
 
 static process *current(void)
 {
@@ -75,7 +94,12 @@ uint32_t usermode_process_fork(usermode_frame *frame)
         child->pid = next_pid++;
     }
     child->exit_status = 0;
+    child->wait_pid = 0;
     child->state = PROCESS_READY;
+    child->waiting_input = 0;
+    child->reap_on_switch = 0;
+    child->is_window = 0;
+    child->is_manager = 0;
     child->parent = parent;
     child->name = parent->name;
     child->space = child_space;
@@ -84,65 +108,346 @@ uint32_t usermode_process_fork(usermode_frame *frame)
     child->kernel_stack_top =
         (uint32_t)(child->kernel_stack + sizeof(child->kernel_stack));
     child->return_esp = usermode_return_esp();
+    child->saved_stack = (uint32_t *)(
+        child->kernel_stack_top - sizeof(child->frame)
+    );
+    uint32_t child_slot = (uint32_t)(child - process_table) + 1;
+    input_queue_head[child_slot] = 0;
+    input_queue_tail[child_slot] = 0;
+    *child->saved_stack = (uint32_t)child->frame.gs;
+    for (uint32_t i = 1; i < sizeof(child->frame) / sizeof(uint32_t); i++) {
+        child->saved_stack[i] = ((uint32_t *)&child->frame)[i];
+    }
     return child->pid;
 }
 
-uint32_t usermode_process_wait(uint32_t pid)
+static void release_process(process *entry)
+{
+    if (!entry || !entry->in_use || entry == &root_process) return;
+    lucid_status st = vmm_space_destroy(entry->space);
+    if (st.ok != 0) panic_status(st);
+    entry->in_use = 0;
+    entry->state = PROCESS_UNUSED;
+    entry->parent = 0;
+    entry->space = 0;
+    entry->saved_stack = 0;
+    entry->wait_pid = 0;
+    entry->waiting_input = 0;
+    entry->reap_on_switch = 0;
+    entry->is_window = 0;
+    uint32_t slot = (uint32_t)(entry - process_table) + 1;
+    if (window_manager_slot == slot) window_manager_slot = 0;
+    entry->is_manager = 0;
+    input_queue_head[slot] = 0;
+    input_queue_tail[slot] = 0;
+}
+
+static void enqueue_key(uint32_t slot, uint32_t key)
+{
+    uint32_t next = (input_queue_tail[slot] + 1) %
+        PROCESS_INPUT_QUEUE_SIZE;
+    if (next == input_queue_head[slot]) return;
+    input_queue[slot][input_queue_tail[slot]] = key;
+    input_queue_tail[slot] = next;
+}
+
+int usermode_process_read_key(void)
+{
+    uint32_t slot = usermode_process_current_slot();
+    if (input_queue_head[slot] == input_queue_tail[slot]) return -1;
+    uint32_t key = input_queue[slot][input_queue_head[slot]];
+    input_queue_head[slot] = (input_queue_head[slot] + 1) %
+        PROCESS_INPUT_QUEUE_SIZE;
+    return (int)key;
+}
+
+static int process_is_visible_window(uint32_t slot)
+{
+    process *entry = process_at_slot(slot);
+    return entry && entry->in_use && entry->is_window &&
+        entry->state != PROCESS_EXITED &&
+        entry->desktop == current_desktop;
+}
+
+static uint32_t next_window_slot(uint32_t from, int direction)
+{
+    for (uint32_t offset = 1; offset <= USERMODE_PROCESS_SLOTS; offset++) {
+        uint32_t slot;
+        if (direction > 0) {
+            slot = (from + offset) % USERMODE_PROCESS_SLOTS;
+        } else {
+            slot = (from + USERMODE_PROCESS_SLOTS - offset) %
+                USERMODE_PROCESS_SLOTS;
+        }
+        if (process_is_visible_window(slot)) return slot;
+    }
+    return 0;
+}
+
+static void close_window(process *entry)
+{
+    if (!entry || !entry->in_use || !entry->is_window ||
+        entry->state == PROCESS_EXITED) {
+        return;
+    }
+    entry->state = PROCESS_EXITED;
+    entry->exit_status = 0;
+    terminal_set_status("Killing Eye");
+    enqueue_key(window_manager_slot, SYS_WM_REAP);
+    if (focused_slot == (uint32_t)(entry == &root_process ? 0 :
+            (entry - process_table + 1))) {
+        focused_slot = next_window_slot(focused_slot, 1);
+    }
+}
+
+void usermode_process_route_key(int key)
+{
+    if (key >= TERMINAL_KEY_MOD_BASE &&
+        key < TERMINAL_KEY_MOD_SHIFT_BASE) {
+        int command = key - TERMINAL_KEY_MOD_BASE;
+        if (window_manager_slot == 0) return;
+        if (command == '\n') {
+            terminal_set_status("Starting Eye");
+            enqueue_key(window_manager_slot, SYS_WM_OPEN);
+        } else if (command == 'q') {
+            process *focused = process_at_slot(focused_slot);
+            close_window(focused);
+        } else if (command == 'j') {
+            focused_slot = next_window_slot(focused_slot, 1);
+            terminal_set_status("Focus changed");
+        } else if (command == 'k') {
+            focused_slot = next_window_slot(focused_slot, -1);
+            terminal_set_status("Focus changed");
+        } else if (command >= '0' && command <= '9') {
+            current_desktop = (uint32_t)(command - '0');
+            focused_slot = next_window_slot(USERMODE_PROCESS_SLOTS - 1, 1);
+            terminal_set_status("Desktop changed");
+        }
+        terminal_refresh();
+        return;
+    }
+    if (key >= TERMINAL_KEY_MOD_SHIFT_BASE &&
+        key < TERMINAL_KEY_MOD_SHIFT_BASE + 0x100) {
+        int command = key - TERMINAL_KEY_MOD_SHIFT_BASE;
+        if (window_manager_slot == 0) return;
+        if (command >= 'A' && command <= 'Z') {
+            command += 'a' - 'A';
+        }
+        if (command == 'q') {
+            terminal_set_status("Brain exiting");
+            for (uint32_t slot = 1; slot < USERMODE_PROCESS_SLOTS; slot++) {
+                close_window(process_at_slot(slot));
+            }
+            terminal_set_status("Brain exiting");
+            enqueue_key(window_manager_slot, SYS_WM_EXIT);
+        } else if (command == 'h' && master_ratio > 30) {
+            master_ratio -= 5;
+            terminal_set_status("Master resized");
+        } else if (command == 'l' && master_ratio < 80) {
+            master_ratio += 5;
+            terminal_set_status("Master resized");
+        } else if (command >= '0' && command <= '9') {
+            process *focused = process_at_slot(focused_slot);
+            if (focused && focused->in_use && focused->is_window) {
+                focused->desktop = (uint32_t)(command - '0');
+                if (focused->desktop != current_desktop) {
+                    focused_slot = next_window_slot(focused_slot, 1);
+                }
+                terminal_set_status("Window moved");
+            }
+        }
+        terminal_refresh();
+        return;
+    }
+
+    uint32_t slot = focused_slot;
+    if (!process_is_visible_window(slot)) slot = 0;
+    enqueue_key(slot, (uint32_t)key);
+}
+
+uint32_t usermode_process_reap(void)
 {
     process *parent = current();
-    process *child = 0;
+    uint32_t reaped = 0;
     for (uint32_t i = 0; i < PROCESS_LIMIT; i++) {
-        if (process_table[i].in_use &&
-            process_table[i].parent == parent &&
-            process_table[i].pid == pid) {
-            child = &process_table[i];
-            break;
+        process *child = &process_table[i];
+        if (child->in_use && child->parent == parent &&
+            child->state == PROCESS_EXITED) {
+            release_process(child);
+            reaped++;
         }
     }
-    if (!child || child->state != PROCESS_READY) return SYS_UNKNOWN_TEST;
+    return reaped;
+}
 
-    parent->space = vmm_space_current();
-    parent->kernel_stack_top = usermode_kernel_stack_top();
-    parent->return_esp = usermode_return_esp();
-    parent->state = PROCESS_WAITING;
-    child->state = PROCESS_RUNNING;
-    current_process = child;
+uint32_t usermode_process_focused_slot(void)
+{
+    return focused_slot;
+}
 
-    lucid_status st = vmm_space_activate(child->space);
-    if (st.ok != 0) {
-        current_process = parent;
-        parent->state = PROCESS_RUNNING;
-        child->state = PROCESS_READY;
-        return SYS_UNKNOWN_TEST;
+int usermode_process_window_visible(uint32_t slot)
+{
+    return process_is_visible_window(slot);
+}
+
+int usermode_process_window_focused(uint32_t slot)
+{
+    return process_is_visible_window(slot) && slot == focused_slot;
+}
+
+uint32_t usermode_process_window_pid(uint32_t slot)
+{
+    process *entry = process_at_slot(slot);
+    return entry && entry->in_use && entry->is_window ? entry->pid : 0;
+}
+
+uint32_t usermode_process_current_desktop(void)
+{
+    return current_desktop;
+}
+
+uint32_t usermode_process_window_desktop(uint32_t slot)
+{
+    process *entry = process_at_slot(slot);
+    return entry && entry->in_use && entry->is_window
+        ? entry->desktop
+        : current_desktop;
+}
+
+uint32_t usermode_process_master_ratio(void)
+{
+    return master_ratio;
+}
+
+int usermode_process_wait(uint32_t pid, usermode_frame *frame)
+{
+    process *parent = current();
+    for (uint32_t i = 0; i < PROCESS_LIMIT; i++) {
+        process *child = &process_table[i];
+        if (!child->in_use || child->parent != parent ||
+            child->pid != pid) {
+            continue;
+        }
+
+        if (child->state == PROCESS_EXITED) {
+            frame->eax = child->pid;
+            release_process(child);
+            return 0;
+        }
+
+        parent->state = PROCESS_WAITING;
+        parent->wait_pid = pid;
+        parent->saved_stack = (uint32_t *)frame;
+        return 1;
     }
-    usermode_set_kernel_stack_top(child->kernel_stack_top);
-    usermode_resume_frame(&child->frame);
+    frame->eax = SYS_UNKNOWN_TEST;
+    return 0;
+}
 
-    current_process = parent;
-    parent->state = PROCESS_RUNNING;
-    st = vmm_space_activate(parent->space);
-    if (st.ok != 0) panic_status(st);
-    usermode_set_kernel_stack_top(parent->kernel_stack_top);
-    usermode_set_return_esp(parent->return_esp);
+static process *process_at_slot(uint32_t slot)
+{
+    if (slot == 0) return &root_process;
+    if (slot > PROCESS_LIMIT) return 0;
+    return &process_table[slot - 1];
+}
 
-    uint32_t child_pid = child->pid;
-    st = vmm_space_destroy(child->space);
+static process *next_runnable(process *from)
+{
+    uint32_t start = from == &root_process ? 0 : PROCESS_LIMIT + 1;
+    if (from != &root_process) {
+        for (uint32_t i = 0; i < PROCESS_LIMIT; i++) {
+            if (&process_table[i] == from) {
+                start = i + 1;
+                break;
+            }
+        }
+    }
+
+    for (uint32_t offset = 1; offset <= PROCESS_LIMIT + 1; offset++) {
+        uint32_t slot = (start + offset) % (PROCESS_LIMIT + 1);
+        process *candidate = process_at_slot(slot);
+        if (candidate && candidate->in_use &&
+            candidate->state == PROCESS_READY) {
+            return candidate;
+        }
+    }
+    if (from && from->in_use && from->state == PROCESS_READY) return from;
+    return 0;
+}
+
+uint32_t *usermode_process_schedule(usermode_frame *frame)
+{
+    process *previous = current();
+    previous->saved_stack = (uint32_t *)frame;
+    if (previous->state == PROCESS_RUNNING) {
+        previous->state = PROCESS_READY;
+    }
+
+    process *next = next_runnable(previous);
+    if (!next) return 0;
+    next->state = PROCESS_RUNNING;
+    current_process = next;
+
+    lucid_status st = vmm_space_activate(next->space);
     if (st.ok != 0) panic_status(st);
-    child->in_use = 0;
-    child->state = PROCESS_UNUSED;
-    child->parent = 0;
-    child->space = 0;
-    return child_pid;
+    usermode_set_kernel_stack_top(next->kernel_stack_top);
+
+    if (previous->reap_on_switch) release_process(previous);
+    return next->saved_stack;
+}
+
+uint32_t *usermode_process_schedule_interrupt(uint32_t *stack)
+{
+    usermode_frame *frame = (usermode_frame *)stack;
+    process *active = current();
+    if ((frame->cs & 3u) != 3u && !active->waiting_input) {
+        return stack;
+    }
+
+    return usermode_process_schedule(frame);
+}
+
+void usermode_process_set_waiting_input(int waiting)
+{
+    process *active = current();
+    active->waiting_input = waiting;
+}
+
+uint32_t usermode_process_current_slot(void)
+{
+    process *active = current_process;
+    if (!active) return 0;
+    if (active == &root_process) return 0;
+    for (uint32_t i = 0; i < PROCESS_LIMIT; i++) {
+        if (&process_table[i] == active) return i + 1;
+    }
+    return 0;
 }
 
 int usermode_process_exec(const char *path, usermode_frame *frame)
 {
     process *process = current();
     const userland_image *image = userland_find_image(path);
-    if (!image) return 0;
+    if (!image) {
+        terminal_write("exec failed: image not registered\n");
+        return 0;
+    }
+    static const char eye_path[] = "/system/bin/eye";
+    static const char brain_path[] = "/system/bin/brain";
+    int is_eye = 1;
+    int is_brain = 1;
+    for (uint32_t i = 0; i < sizeof(eye_path); i++) {
+        if (path[i] != eye_path[i]) is_eye = 0;
+    }
+    for (uint32_t i = 0; i < sizeof(brain_path); i++) {
+        if (path[i] != brain_path[i]) is_brain = 0;
+    }
 
     lucid_status st = vmm_space_clear_user(process->space);
-    if (st.ok != 0) return 0;
+    if (st.ok != 0) {
+        terminal_write("exec failed: address space not active\n");
+        return 0;
+    }
 
     st = usermode_reset_stack();
     if (st.ok == 0) {
@@ -154,8 +459,7 @@ int usermode_process_exec(const char *path, usermode_frame *frame)
         );
     }
     if (st.ok != 0) {
-        process->exit_status = SYS_UNKNOWN_TEST;
-        process->state = PROCESS_EXITED;
+        usermode_process_exit(SYS_UNKNOWN_TEST);
         return -1;
     }
 
@@ -171,15 +475,46 @@ int usermode_process_exec(const char *path, usermode_frame *frame)
     frame->eflags = 0x202;
     frame->user_esp = USERMODE_STACK_TOP;
     process->name = image->path;
+    terminal_process_reset(usermode_process_current_slot());
+    if (is_brain) {
+        process->is_manager = 1;
+        window_manager_slot = usermode_process_current_slot();
+        terminal_config_reload();
+    }
+    if (is_eye) {
+        process->is_window = 1;
+        process->desktop = current_desktop;
+        focused_slot = usermode_process_current_slot();
+        terminal_set_status("Eye started");
+        terminal_refresh();
+    }
     return 1;
 }
 
 void usermode_process_exit(uint32_t status)
 {
-    process *process = current_process;
-    if (!process) return;
-    process->exit_status = status;
-    process->state = PROCESS_EXITED;
+    process *exiting = current();
+    exiting->exit_status = status;
+    exiting->state = PROCESS_EXITED;
+    if (exiting->is_window) {
+        uint32_t slot = usermode_process_current_slot();
+        if (focused_slot == slot) {
+            focused_slot = next_window_slot(slot, 1);
+        }
+        enqueue_key(window_manager_slot, SYS_WM_REAP);
+        terminal_set_status("Eye exited");
+        terminal_refresh();
+    }
+    if (exiting->parent &&
+        exiting->parent->state == PROCESS_WAITING &&
+        exiting->parent->wait_pid == exiting->pid) {
+        usermode_frame *waiting_frame =
+            (usermode_frame *)exiting->parent->saved_stack;
+        waiting_frame->eax = exiting->pid;
+        exiting->parent->wait_pid = 0;
+        exiting->parent->state = PROCESS_READY;
+        exiting->reap_on_switch = 1;
+    }
 }
 
 static int append_process_text(char *buffer,

@@ -1,15 +1,17 @@
 #include "recipes/timer.h"
 #include "recipes/idt.h"
 #include "recipes/status.h"
+#include "recipes/usermode.h"
 #include "internal.h"
 
 volatile uint32_t timer_ticks = 0;
 
 extern void timer_isr(void); /* asm entry point, ends in iret */
 
-void timer_tick_handler(void) {
+uint32_t *timer_tick_handler(uint32_t *stack) {
     timer_ticks++;
     outb(0x20, 0x20); /* PIC EOI */
+    return usermode_process_schedule_interrupt(stack);
 }
 
 uint32_t timer_get_ticks(void) {

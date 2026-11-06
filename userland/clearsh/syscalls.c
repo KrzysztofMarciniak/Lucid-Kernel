@@ -26,6 +26,11 @@ uint32_t terminal_read_key(void)
     return clearsh_syscall(SYS_READKEY, 0, 0, 0, 0);
 }
 
+uint32_t terminal_get_size(void)
+{
+    return clearsh_syscall(SYS_GET_TERMINAL_SIZE, 0, 0, 0, 0);
+}
+
 void terminal_clear(void)
 {
     clearsh_syscall(SYS_CLEAR, 0, 0, 0, 0);

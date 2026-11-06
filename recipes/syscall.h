@@ -19,6 +19,11 @@
 #define SYS_FORK 10u
 #define SYS_EXEC 11u
 #define SYS_WAIT 12u
+#define SYS_REAP 13u
+#define SYS_GET_TERMINAL_SIZE 14u
+#define SYS_WM_OPEN 0x300u
+#define SYS_WM_EXIT 0x301u
+#define SYS_WM_REAP 0x302u
 #define SYS_KEY_UP 0x11u
 #define SYS_KEY_DOWN 0x12u
 #define SYS_KEY_LEFT 0x13u

@@ -449,6 +449,7 @@ lucid_status ramfs_init(void)
         { "/system/info", 0, 0, 1 },
         { "/system/config", 0, 0, 1 },
         { "/system/config/pioneer", 0, 0, 1 },
+        { "/system/config/brain.conf", "bar=top\n", 8, 0 },
         { "/users", 0, 0, 1 },
         { "/users/root", 0, 0, 1 },
         { "/tmp", 0, 0, 1 },
@@ -456,15 +457,18 @@ lucid_status ramfs_init(void)
         { "/system/info/kernel", "Lucid Kernel\n", 13, 0 },
         { "/system/info/version", "0.1.0-pre\n", 10, 0 },
         { "/system/info/architecture", "x86\n", 4, 0 },
-        { "/system/info/boot", "Kernel -> userland Pioneer -> Clearsh\n",
-          sizeof("Kernel -> userland Pioneer -> Clearsh\n") - 1, 0 },
+        { "/system/info/boot",
+          "Kernel -> Pioneer -> Brain -> Eye -> Clearsh\n",
+          sizeof("Kernel -> Pioneer -> Brain -> Eye -> Clearsh\n") - 1, 0 },
         { "/system/info/features",
           "ring3 user mode\nint 0x80 syscalls\nCOM1 and VGA console\n"
           "PS/2 keyboard\nRAMFS and ATA persistent LucidFS\n"
-          "userland Pioneer fork/exec/wait\nClearsh boot scripts\n",
+          "Brain tiled windows and ten desktops\n"
+          "Eye terminal with Clearsh\nClearsh boot scripts\n",
           sizeof("ring3 user mode\nint 0x80 syscalls\nCOM1 and VGA console\n"
                  "PS/2 keyboard\nRAMFS and ATA persistent LucidFS\n"
-                 "userland Pioneer fork/exec/wait\nClearsh boot scripts\n") - 1, 0 },
+                 "Brain tiled windows and ten desktops\n"
+                 "Eye terminal with Clearsh\nClearsh boot scripts\n") - 1, 0 },
         { "/system/info/syscalls",
           "int 0x80: EAX=id, EBX/ECX/EDX/ESI=args; EAX=result\n"
           "0 write(ptr EBX,len ECX)\n1 exit(status EBX)\n"
@@ -474,6 +478,8 @@ lucid_status ramfs_init(void)
           "5 fs_list(path EBX,len ECX,out EDX,capacity ESI)\n"
           "6 readkey()  7 clear()  8 shutdown()  9 get_ticks()\n"
           "10 fork() 11 exec(path EBX,len ECX) 12 wait(pid EBX)\n"
+          "13 reap() 14 terminal_size()  Brain events: "
+          "0x300 open, 0x301 exit, 0x302 reap\n"
           "Failure result: 0xFFFFFFFF. See SYSCALLS.md in the source tree.\n",
           sizeof("int 0x80: EAX=id, EBX/ECX/EDX/ESI=args; EAX=result\n"
                  "0 write(ptr EBX,len ECX)\n1 exit(status EBX)\n"
@@ -483,6 +489,8 @@ lucid_status ramfs_init(void)
                  "5 fs_list(path EBX,len ECX,out EDX,capacity ESI)\n"
                  "6 readkey()  7 clear()  8 shutdown()  9 get_ticks()\n"
                  "10 fork() 11 exec(path EBX,len ECX) 12 wait(pid EBX)\n"
+                 "13 reap() 14 terminal_size()  Brain events: "
+                 "0x300 open, 0x301 exit, 0x302 reap\n"
                  "Failure result: 0xFFFFFFFF. See SYSCALLS.md in the source tree.\n") - 1,
           0 },
         { "/system/info/uptime", "", 0, 0 },

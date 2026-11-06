@@ -37,8 +37,8 @@ lucid_status init_post(void)
 
 void init_run(void)
 {
-    terminal_write("Kernel: starting userland Pioneer\n");
+    terminal_write("Kernel: starting Pioneer supervisor\n");
     usermode_enter((void *)initial_image->load_address);
-    terminal_write("Userland Pioneer exited.\n");
+    terminal_write("Pioneer exited.\n");
     for (;;) __asm__ volatile ("hlt");
 }

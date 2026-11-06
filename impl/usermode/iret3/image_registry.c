@@ -5,6 +5,10 @@
 
 extern const uint8_t pioneer_image_start[];
 extern const uint8_t pioneer_image_end[];
+extern const uint8_t brain_image_start[];
+extern const uint8_t brain_image_end[];
+extern const uint8_t eye_image_start[];
+extern const uint8_t eye_image_end[];
 extern const uint8_t clearsh_image_start[];
 extern const uint8_t clearsh_image_end[];
 
@@ -13,6 +17,20 @@ static const userland_image images[] = {
         "/system/bin/pioneer",
         pioneer_image_start,
         pioneer_image_end,
+        USER_IMAGE_BASE,
+        USER_IMAGE_MEMORY_SIZE
+    },
+    {
+        "/system/bin/brain",
+        brain_image_start,
+        brain_image_end,
+        USER_IMAGE_BASE,
+        USER_IMAGE_MEMORY_SIZE
+    },
+    {
+        "/system/bin/eye",
+        eye_image_start,
+        eye_image_end,
         USER_IMAGE_BASE,
         USER_IMAGE_MEMORY_SIZE
     },

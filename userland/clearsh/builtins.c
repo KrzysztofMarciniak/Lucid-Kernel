@@ -292,6 +292,14 @@ value call_function(function_id id, value *args, size_t count)
             }
             return make_number((int32_t)result);
 
+        case SYS_GET_TERMINAL_SIZE:
+            if (count != 1) {
+                return make_error("syscall 14 takes no arguments");
+            }
+            return make_number((int32_t)clearsh_syscall(
+                SYS_GET_TERMINAL_SIZE, 0, 0, 0, 0
+            ));
+
         case SYS_EXIT:
             return make_error("syscall 1 is unavailable while Clearsh is running");
 

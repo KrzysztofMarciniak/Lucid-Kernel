@@ -1,4 +1,5 @@
 #include "clearsh_internal.h"
+#include "recipes/terminal.h"
 
 typedef struct {
     char buffer[EDITOR_MAX];
@@ -7,9 +8,28 @@ typedef struct {
     int valid;
 } editor_undo;
 
-static size_t editor_previous_line_count;
+static char editor_screen[TERMINAL_MAX_ROWS][TERMINAL_MAX_COLUMNS];
+static char editor_previous_screen[TERMINAL_MAX_ROWS]
+                                  [TERMINAL_MAX_COLUMNS];
+static uint32_t editor_previous_columns;
+static uint32_t editor_previous_rows;
+static size_t editor_view_top;
+static int editor_screen_valid;
 
-static void editor_write_number(size_t number)
+static void editor_append_text(char *row,
+                               size_t width,
+                               size_t *column,
+                               const char *text)
+{
+    while (*text && *column < width) {
+        row[(*column)++] = *text++;
+    }
+}
+
+static void editor_append_number(char *row,
+                                 size_t width,
+                                 size_t *column,
+                                 size_t number)
 {
     char digits[12];
     size_t count = 0;
@@ -17,7 +37,47 @@ static void editor_write_number(size_t number)
         digits[count++] = (char)('0' + number % 10);
         number /= 10;
     } while (number && count < sizeof(digits));
-    while (count) terminal_putc(digits[--count]);
+    while (count && *column < width) {
+        row[(*column)++] = digits[--count];
+    }
+}
+
+static size_t editor_append_output_number(char *output, size_t number)
+{
+    char digits[12];
+    size_t count = 0;
+    do {
+        digits[count++] = (char)('0' + number % 10);
+        number /= 10;
+    } while (number && count < sizeof(digits));
+    for (size_t i = 0; i < count; i++) {
+        output[i] = digits[count - i - 1];
+    }
+    return count;
+}
+
+static void editor_render_row(uint32_t row,
+                              uint32_t columns,
+                              uint32_t first,
+                              uint32_t last)
+{
+    char output[TERMINAL_MAX_COLUMNS + 12];
+    size_t used = 0;
+    output[used++] = '\x1B';
+    output[used++] = '[';
+    used += editor_append_output_number(output + used, row + 1);
+    output[used++] = ';';
+    used += editor_append_output_number(output + used, first + 1);
+    output[used++] = 'H';
+    for (uint32_t column = first; column <= last; column++) {
+        output[used++] = editor_screen[row][column];
+    }
+    output[used] = '\0';
+    terminal_write(output);
+    for (uint32_t column = 0; column < columns; column++) {
+        editor_previous_screen[row][column] =
+            editor_screen[row][column];
+    }
 }
 
 static void editor_save_undo(editor_undo *undo,
@@ -39,56 +99,131 @@ static void editor_render(const char *path,
                           int modified,
                           const char *status)
 {
-    terminal_write("\x1B[H");
-    terminal_write("Clearsh vi: ");
-    terminal_write(path);
-    if (modified) terminal_putc('*');
-    terminal_write("\x1B[K");
-    size_t line = 1;
-    size_t column = 1;
+    uint32_t dimensions = terminal_get_size();
+    uint32_t columns = dimensions >> 16;
+    uint32_t rows = dimensions & 0xFFFFu;
+    if (columns == 0 || columns > TERMINAL_MAX_COLUMNS) {
+        columns = TERMINAL_MAX_COLUMNS;
+    }
+    if (rows == 0 || rows > TERMINAL_MAX_ROWS) {
+        rows = TERMINAL_MAX_ROWS;
+    }
+
+    size_t cursor_line = 0;
+    size_t cursor_column = 0;
     for (size_t i = 0; i < cursor; i++) {
         if (buffer[i] == '\n') {
-            line++;
-            column = 1;
+            cursor_line++;
+            cursor_column = 0;
         } else {
-            column++;
+            cursor_column++;
         }
     }
-    terminal_write("  ");
-    editor_write_number(line);
-    terminal_putc(':');
-    editor_write_number(column);
-    terminal_write("\x1B[K");
-    terminal_putc('\n');
-    size_t line_count = 1;
-    for (size_t i = 0; i <= length; i++) {
-        if (i == cursor) terminal_putc('>');
-        if (i < length) {
-            if (buffer[i] == '\n') {
-                terminal_write("\x1B[K");
-                terminal_putc('\n');
-                line_count++;
-            } else {
-                terminal_putc(buffer[i]);
+
+    uint32_t mode_row = rows > 2 ? rows - 3 : rows - 1;
+    uint32_t status_row = rows > 1 ? rows - 2 : rows - 1;
+    uint32_t content_rows = mode_row > 2 ? mode_row - 2 : 0;
+    if (content_rows) {
+        if (cursor_line < editor_view_top) {
+            editor_view_top = cursor_line;
+        } else if (cursor_line >= editor_view_top + content_rows) {
+            editor_view_top = cursor_line - content_rows + 1;
+        }
+    } else {
+        editor_view_top = cursor_line;
+    }
+
+    for (uint32_t row = 0; row < rows; row++) {
+        for (uint32_t column = 0; column < columns; column++) {
+            editor_screen[row][column] = ' ';
+        }
+    }
+
+    size_t column = 0;
+    editor_append_text(editor_screen[0], columns, &column, "Clearsh vi: ");
+    editor_append_text(editor_screen[0], columns, &column, path);
+    if (modified && column < columns) editor_screen[0][column] = '*';
+
+    if (rows > 1) {
+        column = 0;
+        editor_append_text(editor_screen[1], columns, &column, "  ");
+        editor_append_number(editor_screen[1], columns, &column,
+                             cursor_line + 1);
+        if (column < columns) editor_screen[1][column++] = ':';
+        editor_append_number(editor_screen[1], columns, &column,
+                             cursor_column + 1);
+    }
+
+    size_t line_start = 0;
+    for (size_t line = 0; line < editor_view_top; line++) {
+        while (line_start < length && buffer[line_start] != '\n') {
+            line_start++;
+        }
+        if (line_start < length) line_start++;
+    }
+    for (uint32_t visible_line = 0;
+         visible_line < content_rows && line_start <= length;
+         visible_line++) {
+        size_t line_end = line_start;
+        while (line_end < length && buffer[line_end] != '\n') line_end++;
+        size_t line_length = line_end - line_start;
+        size_t line_number = editor_view_top + visible_line;
+        size_t horizontal_offset = line_number == cursor_line &&
+                                   cursor_column >= columns
+            ? cursor_column - columns + 1
+            : 0;
+        uint32_t screen_row = visible_line + 2;
+        for (uint32_t x = 0; x < columns; x++) {
+            size_t character_column = horizontal_offset + x;
+            if (line_number == cursor_line &&
+                character_column == cursor_column) {
+                editor_screen[screen_row][x] = '>';
+            } else if (character_column < line_length) {
+                char character = buffer[line_start + character_column];
+                editor_screen[screen_row][x] =
+                    character >= 32 ? character : ' ';
             }
         }
+        if (line_end == length) break;
+        line_start = line_end + 1;
     }
-    terminal_write("\x1B[K");
-    terminal_write("\n\n");
-    terminal_write(insert_mode
-        ? "-- INSERT --  Esc: normal mode"
-        : "-- NORMAL --  i/a: insert  :w  :q  :wq  :q!");
-    terminal_write("\x1B[K");
-    terminal_putc('\n');
-    if (status && status[0]) {
-        terminal_write(status);
+
+    column = 0;
+    editor_append_text(editor_screen[mode_row], columns, &column,
+        insert_mode
+            ? "-- INSERT --  Esc: normal mode"
+            : "-- NORMAL --  i/a: insert  :w  :q  :wq  :q!");
+    if (status) {
+        column = 0;
+        editor_append_text(editor_screen[status_row], columns, &column,
+                           status);
     }
-    terminal_write("\x1B[K");
-    terminal_putc('\n');
-    if (line_count < editor_previous_line_count) {
-        terminal_write("\x1B[J");
+
+    if (!editor_screen_valid ||
+        editor_previous_columns != columns ||
+        editor_previous_rows != rows) {
+        for (uint32_t row = 0; row < rows; row++) {
+            for (uint32_t x = 0; x < columns; x++) {
+                editor_previous_screen[row][x] = ' ';
+            }
+        }
+        editor_previous_columns = columns;
+        editor_previous_rows = rows;
+        editor_screen_valid = 1;
     }
-    editor_previous_line_count = line_count;
+    for (uint32_t row = 0; row < rows; row++) {
+        uint32_t first = columns;
+        uint32_t last = 0;
+        for (uint32_t x = 0; x < columns; x++) {
+            if (editor_screen[row][x] != editor_previous_screen[row][x]) {
+                if (first == columns) first = x;
+                last = x;
+            }
+        }
+        if (first != columns) {
+            editor_render_row(row, columns, first, last);
+        }
+    }
 }
 
 static void editor_move_vertical(const char *buffer,
@@ -226,7 +361,8 @@ value edit_file(const value *file)
     int insert_mode = 0;
     int modified = 0;
     char status[64] = "";
-    editor_previous_line_count = 0;
+    editor_screen_valid = 0;
+    editor_view_top = 0;
     terminal_clear();
     for (;;) {
         editor_render(file->data.text, buffer, length, cursor,

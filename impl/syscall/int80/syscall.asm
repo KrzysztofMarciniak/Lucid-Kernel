@@ -1,6 +1,4 @@
 extern syscall_dispatch
-extern usermode_kernel_esp
-extern usermode_kernel_resume
 global syscall_isr
 
 section .text
@@ -22,7 +20,7 @@ syscall_isr:
     call syscall_dispatch
     add esp, 4
     test eax, eax
-    jnz .exit_to_kernel
+    jnz .switch_stack
 
     pop gs
     pop fs
@@ -31,6 +29,19 @@ syscall_isr:
     popa
     iret
 
-.exit_to_kernel:
-    mov esp, [usermode_kernel_esp]
-    jmp usermode_kernel_resume
+.switch_stack:
+    test eax, eax
+    jz .no_process
+    mov esp, eax
+    pop gs
+    pop fs
+    pop es
+    pop ds
+    popa
+    iret
+
+.no_process:
+    cli
+.halt:
+    hlt
+    jmp .halt

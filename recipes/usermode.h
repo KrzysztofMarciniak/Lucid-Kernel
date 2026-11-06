@@ -9,6 +9,7 @@
 
 #define USERMODE_STACK_TOP 0x00800000u
 #define USERMODE_STACK_SIZE 0x00100000u
+#define USERMODE_PROCESS_SLOTS 9u
 
 typedef struct {
     uint32_t gs;
@@ -53,9 +54,23 @@ uint32_t usermode_return_esp(void);
 void usermode_set_return_esp(uint32_t esp);
 
 uint32_t usermode_process_fork(usermode_frame *frame);
-uint32_t usermode_process_wait(uint32_t pid);
+int usermode_process_wait(uint32_t pid, usermode_frame *frame);
 int usermode_process_exec(const char *path, usermode_frame *frame);
 void usermode_process_exit(uint32_t status);
+uint32_t *usermode_process_schedule(usermode_frame *frame);
+uint32_t *usermode_process_schedule_interrupt(uint32_t *stack);
+void usermode_process_set_waiting_input(int waiting);
+uint32_t usermode_process_current_slot(void);
+void usermode_process_route_key(int key);
+int usermode_process_read_key(void);
+uint32_t usermode_process_reap(void);
+uint32_t usermode_process_focused_slot(void);
+int usermode_process_window_visible(uint32_t slot);
+int usermode_process_window_focused(uint32_t slot);
+uint32_t usermode_process_window_pid(uint32_t slot);
+uint32_t usermode_process_current_desktop(void);
+uint32_t usermode_process_window_desktop(uint32_t slot);
+uint32_t usermode_process_master_ratio(void);
 int usermode_process_info(char *buffer, size_t capacity, size_t *length);
 
 #endif

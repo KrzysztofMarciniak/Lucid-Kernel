@@ -257,7 +257,7 @@ build() {
     objs="$objs $BUILD_DIR/curie_font.o"
 
     if echo ",${INIT_BOOT:-}," | grep -q ",usermode,"; then
-        for app in pioneer clearsh; do
+        for app in brain eye pioneer clearsh; do
             app_dir="$SCRIPT_DIR/userland/$app"
             app_objs=""
             for src in "$app_dir"/*.c; do

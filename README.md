@@ -35,7 +35,8 @@ Built entirely local, no sudo, no system package dependencies:
 These are host-side build tools, not programs in the booted kernel image.
 Clearsh cannot run TCC yet: Lucid does not have a general executable loader or
 an ISO filesystem interface. `exec` currently supports only the embedded
-Pioneer and Clearsh images.
+Brain, Eye, Pioneer, and Clearsh images. Brain starts first and launches an
+Eye terminal running Clearsh.
 
 ## Usage
 
@@ -69,9 +70,23 @@ Clearsh supports Ctrl+Left/Right word movement, Ctrl+A/E line boundaries,
 Ctrl+U/K deletion to the beginning/end of the line, Ctrl+W deletion of the
 previous word, and Ctrl+L to clear the display. Tab completes Clearsh function
 names and filesystem paths. The current edit position is highlighted, and
-`vi` redraws in place rather than clearing the screen on each keypress. Boot
-output is preserved after the initial banner, and the terminal halts while
-waiting for input instead of busy-spinning.
+`vi` redraws only changed screen spans, avoiding full-screen redraws on
+keystrokes. Boot output is preserved after the initial banner, and the
+terminal halts while waiting for input instead of busy-spinning.
+
+Brain uses a dwm-inspired master/stack layout. Mod is either Alt key:
+Mod+Enter starts an Eye, Mod+Q closes the focused Eye, and Mod+Shift+Q exits
+Brain to Clearsh. Mod+J/K changes focus, Mod+Shift+H/L adjusts the master
+pane, Mod+0..9 switches desktops, and Mod+Shift+0..9 moves the focused Eye.
+The status bar shows the active desktop, windows, focus, and lifecycle messages
+such as starting or killing an Eye. Its position is read from
+`/system/config/brain.conf`; set `bar=top`, `bar=bottom`, `bar=left`, or
+`bar=right`. The default seeded configuration is `bar=top`; Brain rereads the
+file each time it starts. For example, from Clearsh run
+`(write (file /system/config/brain.conf) (text "bar=left\n"))`, then exit
+Clearsh to let Pioneer restart Brain with the new position. The shell starts on
+desktop 1; desktop 0 remains reserved for boot output when it has no windows.
+Use Mod+0 to view the boot output and Mod+1 to return to the shell.
 
 `disk` produces `lucid-disk.img`: a GRUB/MBR boot disk with a FAT32 boot
 partition and a Lucid data partition for persistent shell files. It is safe to

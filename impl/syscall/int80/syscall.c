@@ -19,15 +19,29 @@ static inline void outw(uint16_t port, uint16_t value)
 #define COMMAND_HISTORY_SIZE 8
 #define COMMAND_HISTORY_LINE_SIZE SYS_LINE_MAX
 
-static char command_history[COMMAND_HISTORY_SIZE][COMMAND_HISTORY_LINE_SIZE];
-static uint32_t command_history_count;
-static char command_history_draft[COMMAND_HISTORY_LINE_SIZE];
-static int command_history_draft_valid;
+typedef struct {
+    char command_history[COMMAND_HISTORY_SIZE][COMMAND_HISTORY_LINE_SIZE];
+    uint32_t command_history_count;
+    char command_history_draft[COMMAND_HISTORY_LINE_SIZE];
+    int command_history_draft_valid;
+    uint16_t input_open_positions[SYS_LINE_MAX];
+    sys_readline_completion readline_completion;
+} readline_state;
+
+static readline_state readline_states[USERMODE_PROCESS_SLOTS];
 static char filesystem_buffer[SYS_FILE_MAX];
 static char completion_probe[SYS_FILE_MAX];
 static char completion_matches[SYS_FILE_MAX];
-static uint16_t input_open_positions[SYS_LINE_MAX];
-static sys_readline_completion readline_completion;
+
+#define READLINE_STATE \
+    readline_states[usermode_process_current_slot()]
+#define command_history (READLINE_STATE.command_history)
+#define command_history_count (READLINE_STATE.command_history_count)
+#define command_history_draft (READLINE_STATE.command_history_draft)
+#define command_history_draft_valid \
+    (READLINE_STATE.command_history_draft_valid)
+#define input_open_positions (READLINE_STATE.input_open_positions)
+#define readline_completion (READLINE_STATE.readline_completion)
 
 static void replace_input_line(char *buffer,
                                uint32_t capacity,
@@ -910,6 +924,11 @@ uint32_t syscall_dispatch(syscall_frame *frame)
         return 0;
     }
 
+    if (frame->eax == SYS_GET_TERMINAL_SIZE) {
+        frame->eax = terminal_get_size();
+        return 0;
+    }
+
     if (frame->eax == SYS_FORK) {
         frame->eax = usermode_process_fork(frame);
         return 0;
@@ -927,19 +946,28 @@ uint32_t syscall_dispatch(syscall_frame *frame)
         for (uint32_t i = 0; i < frame->ecx; i++) path[i] = user_path[i];
         path[frame->ecx] = '\0';
         int result = usermode_process_exec(path, frame);
-        if (result < 0) return 1;
+        if (result < 0) {
+            return (uint32_t)usermode_process_schedule(frame);
+        }
         frame->eax = result ? 0 : SYS_UNKNOWN_TEST;
         return 0;
     }
 
     if (frame->eax == SYS_WAIT) {
-        frame->eax = usermode_process_wait(frame->ebx);
+        if (usermode_process_wait(frame->ebx, frame)) {
+            return (uint32_t)usermode_process_schedule(frame);
+        }
+        return 0;
+    }
+
+    if (frame->eax == SYS_REAP) {
+        frame->eax = usermode_process_reap();
         return 0;
     }
 
     if (frame->eax == SYS_EXIT) {
         usermode_process_exit(frame->ebx);
-        return 1;
+        return (uint32_t)usermode_process_schedule(frame);
     }
 
     if (frame->eax == SYS_FS_READ) {

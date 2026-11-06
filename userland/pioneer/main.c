@@ -26,35 +26,34 @@ static void exit_process(uint32_t status)
     for (;;) { }
 }
 
+static void run_child(const char *path)
+{
+    uint32_t pid = lucid_user_syscall(SYS_FORK, 0, 0, 0, 0);
+    if (pid == SYS_UNKNOWN_TEST) {
+        write_text("Pioneer: fork failed\n");
+        exit_process(1);
+    }
+    if (pid == 0) {
+        uint32_t length = text_length(path);
+        lucid_user_syscall(SYS_EXEC, (uint32_t)path, length, 0, 0);
+        write_text("Pioneer: exec failed\n");
+        exit_process(127);
+    }
+    if (lucid_user_syscall(SYS_WAIT, pid, 0, 0, 0) == SYS_UNKNOWN_TEST) {
+        write_text("Pioneer: wait failed\n");
+        exit_process(1);
+    }
+}
+
 __attribute__((section(".entry")))
 void pioneer_user_entry(void)
 {
-    write_text("Pioneer: launching /system/bin/clearsh\n");
-
     for (;;) {
-        uint32_t pid = lucid_user_syscall(SYS_FORK, 0, 0, 0, 0);
-        if (pid == SYS_UNKNOWN_TEST) {
-            write_text("Pioneer: fork failed\n");
-            exit_process(1);
-        }
-
-        if (pid == 0) {
-            static const char path[] = "/system/bin/clearsh";
-            lucid_user_syscall(
-                SYS_EXEC,
-                (uint32_t)path,
-                sizeof(path) - 1,
-                0,
-                0
-            );
-            write_text("Pioneer: exec failed\n");
-            exit_process(127);
-        }
-
-        if (lucid_user_syscall(SYS_WAIT, pid, 0, 0, 0) ==
-            SYS_UNKNOWN_TEST) {
-            write_text("Pioneer: wait failed\n");
-            exit_process(1);
-        }
+        static const char brain[] = "/system/bin/brain";
+        static const char eye[] = "/system/bin/eye";
+        write_text("Pioneer: starting Brain\n");
+        run_child(brain);
+        write_text("Pioneer: starting Eye\n");
+        run_child(eye);
     }
 }

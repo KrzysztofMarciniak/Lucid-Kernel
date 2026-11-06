@@ -25,7 +25,9 @@ in `/system/info/syscalls`.
 | 9 | `SYS_GETTICKS` | none | PIT ticks since boot (100 ticks/second) |
 | 10 | `SYS_FORK` | none | parent gets child PID; child resumes with result 0 |
 | 11 | `SYS_EXEC` | `EBX` path pointer, `ECX` path length | replaces caller with a registered user image; does not return on success |
-| 12 | `SYS_WAIT` | `EBX` child PID | runs that child synchronously until exit, then returns its PID |
+| 12 | `SYS_WAIT` | `EBX` child PID | blocks until that child exits, then returns its PID |
+| 13 | `SYS_REAP` | none | releases exited child processes |
+| 14 | `SYS_GET_TERMINAL_SIZE` | none | columns in high 16 bits, rows in low 16 bits |
 
 Clearsh and other user programs can call `lucid_user_syscall()` from
 `recipes/syscall.h` when compiled with `LUCID_USER`. Clearsh also provides a
@@ -33,12 +35,12 @@ checked `(syscall number ...)` form for the implemented calls. Arguments are
 typed shell values: text for `SYS_WRITE`, file values for filesystem calls,
 and no arguments for the other calls. Clearsh allocates user buffers itself;
 scripts cannot supply raw pointers. `SYS_EXIT` is deliberately unavailable through the generic syscall form;
-Clearsh exposes it as `(exit [status])`, after which userland Pioneer
-restarts the shell. `SYS_EXEC` currently resolves paths from the kernel's
-registered embedded-image table. `SYS_WAIT` is cooperative, not preemptive:
-the caller blocks in the kernel while the child runs. See `SHELL.md` for
-examples. Named functions such as `(uptime)`, `read`, `write`, and `print`
-remain the simpler interfaces for common operations.
+Clearsh exposes it as `(exit [status])`. Brain manages Eyes as preemptively
+scheduled processes, and the kernel reclaims exited children with
+`SYS_REAP`. `SYS_EXEC` currently resolves paths from the kernel's registered
+embedded-image table. See `SHELL.md` for examples. Named functions such as
+`(uptime)`, `read`, `write`, and `print` remain the simpler interfaces for
+common operations.
 
 `SYS_READLINE` remains usable with only `EBX` and `ECX`. Clearsh passes the
 optional `sys_readline_completion` structure in `EDX`/`ESI`; it contains the

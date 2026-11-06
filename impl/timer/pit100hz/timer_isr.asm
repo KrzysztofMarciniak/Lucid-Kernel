@@ -16,8 +16,14 @@ timer_isr:
     mov fs, ax
     mov gs, ax
 
+    push esp
     call timer_tick_handler
+    add esp, 4
+    test eax, eax
+    jz .restore_current
+    mov esp, eax
 
+.restore_current:
     pop gs
     pop fs
     pop es

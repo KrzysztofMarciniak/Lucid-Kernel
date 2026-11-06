@@ -6,6 +6,9 @@
 
 struct multiboot_info;
 
+#define TERMINAL_MAX_COLUMNS 170u
+#define TERMINAL_MAX_ROWS 64u
+
 /* Recipe: terminal
  * Implementations provide console output, clearing, and input. How output
  * is rendered remains implementation-private.
@@ -21,6 +24,8 @@ struct multiboot_info;
 #define TERMINAL_KEY_CTRL_BASE 0x100
 #define TERMINAL_KEY_CTRL_LEFT 0x120
 #define TERMINAL_KEY_CTRL_RIGHT 0x121
+#define TERMINAL_KEY_MOD_BASE 0x400
+#define TERMINAL_KEY_MOD_SHIFT_BASE 0x500
 
 lucid_status terminal_pre(void);
 lucid_status terminal_init(void);
@@ -28,6 +33,11 @@ lucid_status terminal_post(void);
 
 void terminal_set_boot_info(const struct multiboot_info *info);
 int terminal_framebuffer_mapping(uint32_t *base, uint32_t *length);
+uint32_t terminal_get_size(void);
+void terminal_refresh(void);
+void terminal_config_reload(void);
+void terminal_process_reset(uint32_t slot);
+void terminal_set_status(const char *text);
 
 void terminal_putc(char c);
 void terminal_write(const char *s);

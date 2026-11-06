@@ -103,6 +103,7 @@ uint32_t clearsh_syscall(uint32_t number, uint32_t arg1, uint32_t arg2,
 void terminal_write(const char *text);
 void terminal_putc(char c);
 uint32_t terminal_read_key(void);
+uint32_t terminal_get_size(void);
 void terminal_clear(void);
 int ramfs_read(const char *path, char *buffer, size_t capacity, size_t *length);
 int ramfs_write(const char *path, const char *data, size_t length);
