@@ -20,6 +20,55 @@ static void write_text(const char *text)
     );
 }
 
+static void write_spaces(uint32_t count)
+{
+    char spaces[76];
+    uint32_t chunk = count < sizeof(spaces) ? count : sizeof(spaces);
+    for (uint32_t i = 0; i < chunk; i++) spaces[i] = ' ';
+    while (count) {
+        chunk = count < sizeof(spaces) ? count : sizeof(spaces);
+        lucid_user_syscall(SYS_WRITE, (uint32_t)spaces, chunk, 0, 0);
+        count -= chunk;
+    }
+}
+
+static void write_banner_border(uint32_t width, uint32_t indent)
+{
+    char line[78];
+    line[0] = '+';
+    for (uint32_t i = 1; i < width - 1; i++) line[i] = '-';
+    line[width - 1] = '+';
+    line[width] = '\n';
+    line[width + 1] = '\0';
+    write_spaces(indent);
+    write_text(line);
+}
+
+static void write_banner_line(uint32_t width,
+                              uint32_t indent,
+                              const char *text)
+{
+    char line[78];
+    uint32_t content_capacity = width - 4;
+    uint32_t length = text_length(text);
+    if (length > content_capacity) length = content_capacity;
+
+    uint32_t used = 0;
+    line[used++] = '|';
+    line[used++] = ' ';
+    for (uint32_t i = 0; i < length; i++) line[used++] = text[i];
+    for (uint32_t i = length; i < content_capacity; i++) {
+        line[used++] = ' ';
+    }
+    line[used++] = ' ';
+    line[used++] = '|';
+    line[used++] = '\n';
+    line[used] = '\0';
+
+    write_spaces(indent);
+    write_text(line);
+}
+
 static void exit_process(uint32_t status)
 {
     lucid_user_syscall(SYS_EXIT, status, 0, 0, 0);
@@ -28,18 +77,29 @@ static void exit_process(uint32_t status)
 
 static void show_boot_splash(void)
 {
-    write_text(
-        "\n"
-        "  +--------------------------------------------------------+\n"
-        "  |                                                        |\n"
-        "  |      LUCID KERNEL     /     32-BIT X86                 |\n"
-        "  |      Small kernel. Direct interfaces.                 |\n"
-        "  |                                                        |\n"
-        "  |   [ OK ]  Pioneer supervisor online                   |\n"
-        "  |   [ .. ]  Starting desktop session                    |\n"
-        "  |                                                        |\n"
-        "  +--------------------------------------------------------+\n"
+    uint32_t dimensions = lucid_user_syscall(
+        SYS_GET_TERMINAL_SIZE, 0, 0, 0, 0
     );
+    uint32_t columns = dimensions >> 16;
+    if (columns < 8) columns = 80;
+
+    uint32_t width = columns < 76 ? columns : 76;
+    uint32_t indent = (columns - width) / 2;
+    write_text("\n");
+    write_banner_border(width, indent);
+    write_banner_line(width, indent, "PIONEER");
+    write_banner_line(width, indent, "");
+    write_banner_line(width, indent,
+                      "\"Freedom so often means that one");
+    write_banner_line(width, indent, "isn't needed anywhere.\"");
+    write_banner_line(width, indent,
+                      "- Willa Cather, O Pioneers!");
+    write_banner_line(width, indent, "");
+    write_banner_line(width, indent,
+                      "[ OK ]  Pioneer supervisor online");
+    write_banner_line(width, indent, "[ .. ]  Starting desktop session");
+    write_banner_border(width, indent);
+    write_text("\n");
 }
 
 static void run_child(const char *name, const char *path)
