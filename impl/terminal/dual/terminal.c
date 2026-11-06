@@ -12,6 +12,7 @@
 #define VGA_ATTR 0x07
 #define CURIE_WIDTH 6
 #define CURIE_HEIGHT 12
+#define TERMINAL_ZOOM_MAX 4
 #define TERMINAL_STATUS_MAX 64
 #define TERMINAL_BAR_WIDTH 14
 
@@ -60,6 +61,7 @@ static const char *framebuffer_status =
 static terminal_surface terminal_surfaces[USERMODE_PROCESS_SLOTS];
 static terminal_window terminal_windows[USERMODE_PROCESS_SLOTS];
 static terminal_bar_position terminal_bar = TERMINAL_BAR_TOP;
+static uint32_t terminal_zoom = 1;
 static int terminal_config_loaded;
 static char terminal_status[TERMINAL_STATUS_MAX] = "Ready";
 static int left_shift;
@@ -135,17 +137,24 @@ static void framebuffer_draw_glyph_colors(size_t row,
 {
     if (glyph >= 128) glyph = '?';
 
+    uint32_t scale = terminal_zoom;
     for (uint32_t y = 0; y < CURIE_HEIGHT; y++) {
         uint8_t bits = curie_font[glyph][y];
-        for (uint32_t x = 0; x < CURIE_WIDTH; x++) {
-            uint32_t color = (bits & (1u << (CURIE_WIDTH - 1 - x)))
-                ? foreground
-                : background;
-            framebuffer_pixel(
-                (uint32_t)(col * CURIE_WIDTH + x),
-                (uint32_t)(row * CURIE_HEIGHT + y),
-                color
-            );
+        for (uint32_t y_scale = 0; y_scale < scale; y_scale++) {
+            for (uint32_t x = 0; x < CURIE_WIDTH; x++) {
+                uint32_t color = (bits & (1u << (CURIE_WIDTH - 1 - x)))
+                    ? foreground
+                    : background;
+                for (uint32_t x_scale = 0; x_scale < scale; x_scale++) {
+                    framebuffer_pixel(
+                        (uint32_t)(col * CURIE_WIDTH * scale +
+                                   x * scale + x_scale),
+                        (uint32_t)(row * CURIE_HEIGHT * scale +
+                                   y * scale + y_scale),
+                        color
+                    );
+                }
+            }
         }
     }
 }
@@ -163,7 +172,7 @@ static int terminal_surfaces_initialized;
 static uint32_t screen_columns(void)
 {
     uint32_t columns = framebuffer
-        ? framebuffer_width / CURIE_WIDTH
+        ? framebuffer_width / (CURIE_WIDTH * terminal_zoom)
         : VGA_WIDTH;
     if (columns > TERMINAL_MAX_COLUMNS) columns = TERMINAL_MAX_COLUMNS;
     return columns;
@@ -172,7 +181,7 @@ static uint32_t screen_columns(void)
 static uint32_t screen_rows(void)
 {
     uint32_t rows = framebuffer
-        ? framebuffer_height / CURIE_HEIGHT
+        ? framebuffer_height / (CURIE_HEIGHT * terminal_zoom)
         : VGA_HEIGHT;
     if (rows > TERMINAL_MAX_ROWS) rows = TERMINAL_MAX_ROWS;
     return rows;
@@ -219,6 +228,25 @@ static void load_terminal_config(void)
 {
     if (terminal_config_loaded) return;
     terminal_config_loaded = 1;
+
+    static const char zoom_path[] = "/system/config/clearsh/zoom";
+    char zoom_config[8];
+    size_t zoom_length = 0;
+    if (ramfs_read(zoom_path, zoom_config, sizeof(zoom_config),
+                   &zoom_length) == 0) {
+        while (zoom_length &&
+               (zoom_config[zoom_length - 1] == '\n' ||
+                zoom_config[zoom_length - 1] == '\r')) {
+            zoom_length--;
+        }
+        if (zoom_length == 1 && zoom_config[0] >= '1' &&
+            zoom_config[0] <= '0' + TERMINAL_ZOOM_MAX) {
+            terminal_zoom = (uint32_t)(zoom_config[0] - '0');
+        } else {
+            static const char invalid[] = "Invalid Clearsh zoom (1-4)";
+            terminal_set_status(invalid);
+        }
+    }
 
     static const char path[] = "/system/config/brain.conf";
     char config[128];
@@ -457,9 +485,9 @@ static void draw_surface_window(uint32_t slot)
 
 static void refresh_window_layout(void)
 {
+    load_terminal_config();
     uint32_t columns = screen_columns();
     uint32_t rows = screen_rows();
-    load_terminal_config();
     uint32_t origin_x = 0;
     uint32_t origin_y = 0;
     uint32_t workspace_width = columns;
@@ -840,6 +868,15 @@ void terminal_putc(char c)
 void terminal_write(const char *s)
 {
     while (*s) terminal_putc(*s++);
+}
+
+void terminal_flush(void)
+{
+    serial_init();
+    if (!serial_available) return;
+    for (uint32_t spin = 0; spin < 1000000u; spin++) {
+        if (inb(COM1 + 5) & 0x40) return;
+    }
 }
 
 static int scancode_to_ascii(uint8_t code)

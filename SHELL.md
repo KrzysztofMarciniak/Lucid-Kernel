@@ -18,9 +18,17 @@ eight most recent commands; moving down past the newest command restores the
 unfinished draft. Ctrl+Left/Right move by words, treating whitespace and Lisp
 delimiters as boundaries. Ctrl+A/E move to the line start/end, Ctrl+U/K delete
 to the left/right, Ctrl+W deletes the previous word, and Ctrl+L redraws the
-screen. Tab completes Clearsh function names and unquoted paths inside
-`(file ...)`; a unique match is inserted, while multiple matches extend the
-common prefix and list candidates.
+screen. On the framebuffer console, set `/system/config/clearsh/zoom` to `1`
+through `4` to scale the display; the default is `1`, and changes apply
+immediately. For example:
+
+```lisp
+(write (file /system/config/clearsh/zoom) (text "2"))
+```
+
+VGA text mode remains at its native size. Tab completes Clearsh function names
+and unquoted paths inside `(file ...)`; a unique match is inserted, while
+multiple matches extend the common prefix and list candidates.
 Opening parentheses and quotes insert their matching closer; unmatched closers
 are completed when the line is submitted. Serial terminals may use ANSI
 Ctrl+Arrow sequences (for example, `ESC [ 1 ; 5 D` for Ctrl+Left).
@@ -50,9 +58,12 @@ with `/`. Quoted strings support `\n`, `\t`, `\"`, and `\\` escapes.
 
 `file` normalizes relative paths and `..`. `read` and `write` operate on files;
 `ls` lists a directory, `cd` changes the current directory, and `pwd` returns
-it. The filesystem includes `/system/info`, `/system/config/pioneer`,
-`/users/root`, and `/tmp`. It supports 64 entries, paths up to 255 characters,
-and files up to 4096 bytes. Disk-image boots preserve changes across reboots.
+it. The filesystem includes `/system/info`, `/system/config/clearsh`,
+`/system/config/pioneer`, `/users/root`, `/tmp`, `/README.txt`, and `/help`.
+Read the guide index with
+`(print (read (file /help/README.txt)))`. It supports 64 entries, paths up to
+255 characters, and files up to 4096 bytes. Disk-image boots preserve changes
+across reboots.
 
 ## Lists and lambdas
 
@@ -103,6 +114,23 @@ exit Clearsh and let Pioneer restart it. Unsupported syscall numbers or
 invalid argument types return an error.
 File and console I/O—including `read`, `write`, `ls`, `vi`, and `run`—uses
 syscalls. Math, logic, and list/lambda evaluation remain Clearsh intrinsics.
+`ls` prints a file's name when given a file path; directory paths still list
+their children.
+
+Common kernel calls are also available as virtual files:
+
+```lisp
+(ls (file /system/syscalls))
+(write (file /system/syscalls/write) (text "hello\n"))
+(print (read (file /system/syscalls/get_ticks)))
+(print (read (file /system/syscalls/terminal_size)))
+```
+
+`readkey` waits for input and returns a numeric key code; `reap` releases exited
+children. `clear` and `shutdown` are write-only control files, and writing to
+`shutdown` powers off the machine. The directory is virtual; its endpoint
+files cannot be replaced with ordinary file contents. See `SYSCALLS.md` for
+the full endpoint list and per-file behavior.
 
 ## Other functions
 
@@ -130,8 +158,9 @@ save/quit. The editor supports one 4096-byte buffer.
 
 `(install)` explains how to build a bootable disk image with
 `./build.sh disk`; Clearsh does not yet partition or overwrite a physical disk.
-`(shutdown)` and `(poweroff)` request
-poweroff through the QEMU/Bochs legacy power ports.
+`(shutdown)` and `(poweroff)` request ACPI S5 poweroff when firmware exposes
+the required tables, then try the QEMU/Bochs legacy power ports. When a QEMU
+guest powers off, QEMU exits normally; this does not shut down the host.
 
 Pioneer reads `/system/config/pioneer/boot` before showing the prompt. Each
 nonblank line names a Clearsh script; relative paths resolve inside

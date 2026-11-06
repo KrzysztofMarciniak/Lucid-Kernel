@@ -2,7 +2,7 @@
 # build.sh - build and run myos
 # Usage:
 #   ./build.sh                  build only
-#   ./build.sh run              build + boot in QEMU (serial output in terminal)
+#   ./build.sh run              build + boot in QEMU (serial text mode by default)
 #   ./build.sh test             build + boot headless, serial output to stdout
 #   ./build.sh disk             create a bootable 128 MiB BIOS disk image
 #   ./build.sh disk-run         create and boot the disk image in QEMU
@@ -13,7 +13,7 @@
 #   ./build.sh install-grub     build grub     (local, no sudo, no system deps used)
 #   ./build.sh install-all      build all of the above, in dependency order
 #   make get-font              download the Curie bitmap font
-#   LUCID_TEXT_MODE=1          boot through VGA text mode for font diagnostics
+#   LUCID_TEXT_MODE=1          force VGA text mode
 #
 # All install-* targets build into .thirdparty/local and NEVER use anything
 # already on the system, even if a system copy exists -- this keeps the
@@ -30,6 +30,11 @@ if [ -f "$SCRIPT_DIR/config.mk" ]; then
 fi
 MEMORY_MB="${MEMORY_MB:-256}"
 LOW_RESERVED_MB="${LOW_RESERVED_MB:-4}"
+if [ "${LUCID_TEXT_MODE+x}" = x ]; then
+    LUCID_TEXT_MODE_EXPLICIT=1
+else
+    LUCID_TEXT_MODE_EXPLICIT=0
+fi
 LUCID_TEXT_MODE="${LUCID_TEXT_MODE:-0}"
 
 case "$LUCID_TEXT_MODE" in
@@ -516,7 +521,18 @@ run_qemu() {
     fi
 }
 
+serial_run_mode() {
+    if [ "$1" = "1" ] && [ "$LUCID_TEXT_MODE_EXPLICIT" = "0" ]; then
+        LUCID_TEXT_MODE=1
+        ASFLAGS="$ASFLAGS -DLUCID_TEXT_MODE"
+        echo "[qemu] using text mode for serial-only output"
+    fi
+}
+
 run() {
+    if [ "$QEMU_DISPLAY" = "none" ]; then
+        serial_run_mode 1
+    fi
     build
     run_qemu -cdrom "$ISO" -boot d -display "$QEMU_DISPLAY" -serial stdio -m "${MEMORY_MB}M"
 }
@@ -526,6 +542,7 @@ run() {
 # a triple fault / exception halt) since idt.c already logs exceptions
 # via serial_print. Ctrl-A X to exit qemu.
 test() {
+    serial_run_mode 1
     build
     echo "[test] booting headless, serial -> stdout (Ctrl-A X to quit)"
 	run_qemu \
@@ -545,6 +562,9 @@ disk() {
 }
 
 disk_run() {
+    if [ "$QEMU_DISPLAY" = "none" ]; then
+        serial_run_mode 1
+    fi
     build_disk_image
     run_qemu \
         -drive "file=$DISK_IMAGE,format=raw,if=ide" \

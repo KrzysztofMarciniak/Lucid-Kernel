@@ -267,6 +267,16 @@ value call_function(function_id id, value *args, size_t count)
             return output;
         }
 
+        case SYS_FS_STAT:
+            if (count != 2 || args[1].type != VALUE_FILE) {
+                return make_error("syscall 15 expects one file value");
+            }
+            result = (uint32_t)ramfs_is_directory(args[1].data.text);
+            if (result == SYS_UNKNOWN_TEST) {
+                return make_error("syscall 15 failed");
+            }
+            return make_number((int32_t)result);
+
         case SYS_READKEY:
             if (count != 1) return make_error("syscall 6 takes no arguments");
             return make_number((int32_t)clearsh_syscall(
@@ -490,7 +500,23 @@ value call_function(function_id id, value *args, size_t count)
             return make_error("ls expects a file value");
         }
         if (ramfs_list(path, entries, sizeof(entries) - 1, &length)) {
-            return make_error("directory could not be listed");
+            if (ramfs_is_directory(path) != 0) {
+                return make_error("directory could not be listed");
+            }
+            size_t name_end = string_length(path);
+            while (name_end > 0 && path[name_end - 1] == '/') name_end--;
+            size_t name_start = name_end;
+            while (name_start > 0 && path[name_start - 1] != '/') {
+                name_start--;
+            }
+            if (name_start == name_end) {
+                return make_error("file name could not be determined");
+            }
+            for (size_t i = name_start; i < name_end; i++) {
+                terminal_putc(path[i]);
+            }
+            terminal_putc('\n');
+            return make_value(VALUE_NIL);
         }
         entries[length] = '\0';
         if (length) terminal_write(entries);
@@ -504,7 +530,8 @@ value call_function(function_id id, value *args, size_t count)
         if (count != 1 || args[0].type != VALUE_FILE) {
             return make_error("cd expects one directory file");
         }
-        if (ramfs_list(args[0].data.text, entries,
+        if (ramfs_is_directory(args[0].data.text) != 1 ||
+            ramfs_list(args[0].data.text, entries,
                        sizeof(entries) - 1, &length)) {
             return make_error("directory does not exist");
         }

@@ -7,3 +7,4 @@ qemu.log
 .isodir/
 boot.o
 .build/
+__pycache__/

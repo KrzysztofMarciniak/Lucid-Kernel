@@ -12,5 +12,6 @@ lucid_status ramfs_post(void);
 int ramfs_read(const char *path, char *buffer, size_t capacity, size_t *length);
 int ramfs_write(const char *path, const char *data, size_t length);
 int ramfs_list(const char *path, char *buffer, size_t capacity, size_t *length);
+int ramfs_is_directory(const char *path);
 
 #endif

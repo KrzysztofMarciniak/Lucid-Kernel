@@ -2,6 +2,8 @@
 
 A non-POSIX, KISS kernel. Everything is a file.
 
+![Logo](LogoLucid.png)
+
 ## Philosophy
 
 - **KISS above all** — the simplest correct implementation wins over the flexible/general one.
@@ -60,6 +62,10 @@ Eye terminal running Clearsh.
 make get-font               download the Curie bitmap font
 ```
 
+`tools/lucidc.py` is a small host-side cross-compiler for a C-like subset that
+emits 32-bit Lucid user images. See [LUCIDC.md](LUCIDC.md) for the language,
+compiler command, and current image-loader limitations.
+
 ### Compile and run
 
 From the repository root, fetch the font once and build the bootable ISO:
@@ -69,10 +75,61 @@ make get-font
 ./build.sh
 ```
 
-To try it in QEMU, run `./build.sh test` for a headless boot with serial output,
-or run `QEMU_DISPLAY=gtk ./build.sh run` for a graphical VM. If the bundled
-compiler and image tools are missing, `./build.sh install-all` builds local
-copies under `.thirdparty/local`.
+`./build.sh run` boots into the terminal-only serial console by default, using
+text-mode dimensions instead of assuming a graphical framebuffer. Use
+`QEMU_DISPLAY=gtk ./build.sh run` for the graphical framebuffer VM, or
+`./build.sh test` for a headless serial smoke test. If the bundled compiler
+and image tools are missing, `./build.sh install-all` builds local copies under
+`.thirdparty/local`.
+
+### Use syscalls
+
+The easiest way to try a syscall in Clearsh is through its virtual syscall
+files:
+
+```lisp
+(write (file /system/syscalls/write) (text "Hello from Lucid!\n"))
+(print (read (file /system/syscalls/get_ticks)))
+```
+
+Clearsh also provides a checked `(syscall number ...)` form. For example,
+`(syscall 0 (text "Hello from Lucid!\n"))` writes text and `(syscall 9)` reads
+the PIT tick count. Arguments are typed shell values; Clearsh does not expose
+raw kernel pointers.
+
+A ring-3 C program uses the wrapper in `recipes/syscall.h`. This example calls
+`SYS_WRITE`, passing the address and byte length of a user-space string:
+the wrapper invokes `int 0x80` with the syscall number in `EAX`, arguments in
+`EBX`/`ECX`/`EDX`/`ESI`, and reads the result from `EAX`.
+
+```c
+#define LUCID_USER
+#include "recipes/syscall.h"
+
+__attribute__((section(".entry")))
+void example_user_entry(void)
+{
+    static const char message[] = "Hello from ring 3!\n";
+    uint32_t result = lucid_user_syscall(
+        SYS_WRITE,
+        (uint32_t)message,
+        sizeof(message) - 1,
+        0,
+        0
+    );
+
+    if (result == SYS_UNKNOWN_TEST) {
+        lucid_user_syscall(SYS_EXIT, 1, 0, 0, 0);
+        for (;;) { }
+    }
+}
+```
+
+On success, `SYS_WRITE` returns the number of bytes written; failures return
+`SYS_UNKNOWN_TEST`. The kernel validates user pointers before accessing them.
+See [SYSCALLS.md](SYSCALLS.md) for the syscall numbers, argument registers,
+return values, and instructions for adding a syscall. User images must
+currently be embedded and registered in the kernel before `exec` can run them.
 
 ### Make a bootable USB
 
@@ -111,7 +168,9 @@ Lucid requests a 1024x768x32 GRUB framebuffer and renders console text with
 Curie's 6x12 regular BDF glyphs.
 If the bootloader cannot provide a compatible RGB framebuffer, output falls
 back to VGA text mode. The font's SIL Open Font License is included in the
-boot image.
+boot image. On the framebuffer console, Clearsh zoom is set by writing `1`
+through `4` to `/system/config/clearsh/zoom` (default `1`); the display and
+terminal dimensions update immediately. VGA text mode keeps its native size.
 
 To compare against the standard VGA text font, build and boot with
 `LUCID_TEXT_MODE=1 QEMU_DISPLAY=gtk ./build.sh run`. This skips GRUB's graphics
@@ -121,10 +180,17 @@ mode is unchanged.
 Clearsh supports Ctrl+Left/Right word movement, Ctrl+A/E line boundaries,
 Ctrl+U/K deletion to the beginning/end of the line, Ctrl+W deletion of the
 previous word, and Ctrl+L to clear the display. Tab completes Clearsh function
-names and filesystem paths. The current edit position is highlighted, and
-`vi` redraws only changed screen spans, avoiding full-screen redraws on
-keystrokes. Boot output is preserved after the initial banner, and the
-terminal halts while waiting for input instead of busy-spinning.
+names and filesystem paths. Common syscalls are exposed as virtual files under
+`/system/syscalls`; see [Use syscalls](#use-syscalls) for examples. Set
+framebuffer zoom with
+`(write (file /system/config/clearsh/zoom) (text "2"))`. The current edit
+position is highlighted, and `vi` redraws only changed screen spans, avoiding
+full-screen redraws on keystrokes. Boot output is preserved after the initial
+banner, and the terminal halts while waiting for input instead of
+busy-spinning. Built-in runtime guides are available at `/README.txt` and
+under `/help`.
+Poweroff uses ACPI S5 when firmware provides it, with QEMU/Bochs legacy-port
+fallback; shutting down a QEMU guest exits QEMU but leaves the host running.
 
 Brain uses a dwm-inspired master/stack layout. Mod is either Alt key:
 Mod+Enter starts an Eye, Mod+Q closes the focused Eye, and Mod+Shift+Q exits

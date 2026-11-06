@@ -445,14 +445,147 @@ lucid_status ramfs_init(void)
         int directory;
     } seeds[] = {
         { "/", 0, 0, 1 },
+        { "/help", 0, 0, 1 },
         { "/system", 0, 0, 1 },
         { "/system/info", 0, 0, 1 },
         { "/system/config", 0, 0, 1 },
+        { "/system/config/clearsh", 0, 0, 1 },
         { "/system/config/pioneer", 0, 0, 1 },
+        { "/system/config/clearsh/zoom", "1\n", 2, 0 },
         { "/system/config/brain.conf", "bar=top\n", 8, 0 },
         { "/users", 0, 0, 1 },
         { "/users/root", 0, 0, 1 },
         { "/tmp", 0, 0, 1 },
+        { "/README.txt",
+          "Lucid Kernel\n"
+          "============\n"
+          "Lucid is a compact, non-POSIX hobby operating system.\n"
+          "Boot flow: Kernel -> Pioneer -> Brain -> Eye -> Clearsh.\n"
+          "You are at the Clearsh prompt. Try (help) or (ls (file /help)).\n"
+          "Read the built-in guide with:\n"
+          "  (print (read (file /help/README.txt)))\n"
+          "Other guides: /help/CLEARSH.txt, /help/BRAIN.txt, "
+          "/help/SYSTEM.txt\n"
+          "Files in RAM are volatile unless booted with a Lucid disk image.\n",
+          sizeof("Lucid Kernel\n"
+                 "============\n"
+                 "Lucid is a compact, non-POSIX hobby operating system.\n"
+                 "Boot flow: Kernel -> Pioneer -> Brain -> Eye -> Clearsh.\n"
+                 "You are at the Clearsh prompt. Try (help) or (ls (file /help)).\n"
+                 "Read the built-in guide with:\n"
+                 "  (print (read (file /help/README.txt)))\n"
+                 "Other guides: /help/CLEARSH.txt, /help/BRAIN.txt, "
+                 "/help/SYSTEM.txt\n"
+                 "Files in RAM are volatile unless booted with a Lucid disk image.\n") - 1,
+          0 },
+        { "/help/README.txt",
+          "Lucid built-in help\n"
+          "===================\n"
+          "Read this file with (print (read (file /help/README.txt))).\n"
+          "Read another guide by replacing its path in that expression.\n"
+          "  /help/CLEARSH.txt  Clearsh commands and keyboard input\n"
+          "  /help/BRAIN.txt    Brain windows, desktops, and status bar\n"
+          "  /help/SYSTEM.txt   System paths, syscalls, and storage\n"
+          "Use (ls (file /system/info)) for live system information.\n"
+          "Use (help) for a short command and syntax summary.\n",
+          sizeof("Lucid built-in help\n"
+                 "===================\n"
+                 "Read this file with (print (read (file /help/README.txt))).\n"
+                 "Read another guide by replacing its path in that expression.\n"
+                 "  /help/CLEARSH.txt  Clearsh commands and keyboard input\n"
+                 "  /help/BRAIN.txt    Brain windows, desktops, and status bar\n"
+                 "  /help/SYSTEM.txt   System paths, syscalls, and storage\n"
+                 "Use (ls (file /system/info)) for live system information.\n"
+                 "Use (help) for a short command and syntax summary.\n") - 1,
+          0 },
+        { "/help/CLEARSH.txt",
+          "Clearsh guide\n"
+          "=============\n"
+          "Clearsh evaluates one Lisp expression per input line.\n"
+          "  (ls (file /help))\n"
+          "  (print (read (file /system/info/name)))\n"
+          "  (write (file /users/root/note) (text \"hello\\n\"))\n"
+          "Use (pwd), (cd (file /path)), (vi (file /path)), (run (file /path)),\n"
+          "(uptime), and (exit). Use (help) for more examples.\n"
+          "Arrows edit; Up/Down browse history. Ctrl+Left/Right move by word;\n"
+          "Ctrl+A/E go to line ends; Ctrl+U/K delete to an end; Ctrl+W deletes\n"
+          "a word; Ctrl+L clears. Tab completes function names and file paths.\n"
+          "On framebuffer displays, set zoom with:\n"
+          "  (write (file /system/config/clearsh/zoom) (text \"2\"))\n"
+          "Zoom values are 1-4; VGA text mode stays at native size.\n",
+          sizeof("Clearsh guide\n"
+                 "=============\n"
+                 "Clearsh evaluates one Lisp expression per input line.\n"
+                 "  (ls (file /help))\n"
+                 "  (print (read (file /system/info/name)))\n"
+                 "  (write (file /users/root/note) (text \"hello\\n\"))\n"
+                 "Use (pwd), (cd (file /path)), (vi (file /path)), (run (file /path)),\n"
+                 "(uptime), and (exit). Use (help) for more examples.\n"
+                 "Arrows edit; Up/Down browse history. Ctrl+Left/Right move by word;\n"
+                 "Ctrl+A/E go to line ends; Ctrl+U/K delete to an end; Ctrl+W deletes\n"
+                 "a word; Ctrl+L clears. Tab completes function names and file paths.\n"
+                 "On framebuffer displays, set zoom with:\n"
+                 "  (write (file /system/config/clearsh/zoom) (text \"2\"))\n"
+                 "Zoom values are 1-4; VGA text mode stays at native size.\n") - 1,
+          0 },
+        { "/help/BRAIN.txt",
+          "Brain window manager\n"
+          "====================\n"
+          "Brain manages Eye terminal windows. Mod is either Alt key.\n"
+          "  Mod+Enter       open an Eye terminal\n"
+          "  Mod+Q           close the focused window\n"
+          "  Mod+Shift+Q     exit Brain\n"
+          "  Mod+J / Mod+K   focus the left / right window\n"
+          "  Mod+Shift+H/L   shrink / grow the master window\n"
+          "  Mod+0..9        switch desktop\n"
+          "  Mod+Shift+0..9  move focused window to desktop\n"
+          "The shell starts on desktop 1. Desktop 0 shows boot output when empty.\n"
+          "Set the status bar with /system/config/brain.conf, for example:\n"
+          "  (write (file /system/config/brain.conf) (text \"bar=left\\n\"))\n"
+          "Valid positions: top, bottom, left, right. Changes apply when written.\n",
+          sizeof("Brain window manager\n"
+                 "====================\n"
+                 "Brain manages Eye terminal windows. Mod is either Alt key.\n"
+                 "  Mod+Enter       open an Eye terminal\n"
+                 "  Mod+Q           close the focused window\n"
+                 "  Mod+Shift+Q     exit Brain\n"
+                 "  Mod+J / Mod+K   focus the left / right window\n"
+                 "  Mod+Shift+H/L   shrink / grow the master window\n"
+                 "  Mod+0..9        switch desktop\n"
+                 "  Mod+Shift+0..9  move focused window to desktop\n"
+                 "The shell starts on desktop 1. Desktop 0 shows boot output when empty.\n"
+                 "Set the status bar with /system/config/brain.conf, for example:\n"
+                 "  (write (file /system/config/brain.conf) (text \"bar=left\\n\"))\n"
+                 "Valid positions: top, bottom, left, right. Changes apply when written.\n") - 1,
+          0 },
+        { "/help/SYSTEM.txt",
+          "System guide\n"
+          "============\n"
+          "Runtime information is under /system/info:\n"
+          "  name, version, architecture, boot, features, uptime, memory,\n"
+          "  storage, processes, syscalls\n"
+          "Common kernel interfaces are files under /system/syscalls:\n"
+          "  write, readkey, clear, shutdown, get_ticks, terminal_size, reap\n"
+          "Example: (print (read (file /system/syscalls/get_ticks)))\n"
+          "The filesystem is RAM-backed. A Lucid disk image saves snapshots;\n"
+          "without one, changes are lost on power off. Shutdown uses ACPI S5\n"
+          "when available, with QEMU/Bochs legacy ports as fallback. QEMU exits\n"
+          "when its guest powers off; the host remains running.\n"
+          "The host-side (install) function only prints disk-image guidance.\n",
+          sizeof("System guide\n"
+                 "============\n"
+                 "Runtime information is under /system/info:\n"
+                 "  name, version, architecture, boot, features, uptime, memory,\n"
+                 "  storage, processes, syscalls\n"
+                 "Common kernel interfaces are files under /system/syscalls:\n"
+                 "  write, readkey, clear, shutdown, get_ticks, terminal_size, reap\n"
+                 "Example: (print (read (file /system/syscalls/get_ticks)))\n"
+                 "The filesystem is RAM-backed. A Lucid disk image saves snapshots;\n"
+                 "without one, changes are lost on power off. Shutdown uses ACPI S5\n"
+                 "when available, with QEMU/Bochs legacy ports as fallback. QEMU exits\n"
+                 "when its guest powers off; the host remains running.\n"
+                 "The host-side (install) function only prints disk-image guidance.\n") - 1,
+          0 },
         { "/system/info/name", "Lucid\n", 6, 0 },
         { "/system/info/kernel", "Lucid Kernel\n", 13, 0 },
         { "/system/info/version", "0.1.0-pre\n", 10, 0 },
@@ -478,8 +611,11 @@ lucid_status ramfs_init(void)
           "5 fs_list(path EBX,len ECX,out EDX,capacity ESI)\n"
           "6 readkey()  7 clear()  8 shutdown()  9 get_ticks()\n"
           "10 fork() 11 exec(path EBX,len ECX) 12 wait(pid EBX)\n"
-          "13 reap() 14 terminal_size()  Brain events: "
+          "13 reap() 14 terminal_size() 15 fs_stat(path EBX,len ECX)\n"
+          "Brain events: "
           "0x300 open, 0x301 exit, 0x302 reap\n"
+          "File endpoints: /system/syscalls/{write,readkey,clear,shutdown,"
+          "get_ticks,terminal_size,reap}\n"
           "Failure result: 0xFFFFFFFF. See SYSCALLS.md in the source tree.\n",
           sizeof("int 0x80: EAX=id, EBX/ECX/EDX/ESI=args; EAX=result\n"
                  "0 write(ptr EBX,len ECX)\n1 exit(status EBX)\n"
@@ -489,8 +625,11 @@ lucid_status ramfs_init(void)
                  "5 fs_list(path EBX,len ECX,out EDX,capacity ESI)\n"
                  "6 readkey()  7 clear()  8 shutdown()  9 get_ticks()\n"
                  "10 fork() 11 exec(path EBX,len ECX) 12 wait(pid EBX)\n"
-                 "13 reap() 14 terminal_size()  Brain events: "
+                 "13 reap() 14 terminal_size() 15 fs_stat(path EBX,len ECX)\n"
+                 "Brain events: "
                  "0x300 open, 0x301 exit, 0x302 reap\n"
+                 "File endpoints: /system/syscalls/{write,readkey,clear,"
+                 "shutdown,get_ticks,terminal_size,reap}\n"
                  "Failure result: 0xFFFFFFFF. See SYSCALLS.md in the source tree.\n") - 1,
           0 },
         { "/system/info/uptime", "", 0, 0 },
@@ -522,6 +661,15 @@ lucid_status ramfs_init(void)
     if (partition > 0) {
         int loaded = load_persistent_nodes();
         if (loaded > 0) {
+            for (size_t i = 0; i < sizeof(seeds) / sizeof(seeds[0]); i++) {
+                if (!find_node(seeds[i].path) &&
+                    parent_is_directory(seeds[i].path)) {
+                    if (!add_node(seeds[i].path, seeds[i].data,
+                                  seeds[i].length, seeds[i].directory)) {
+                        break;
+                    }
+                }
+            }
             return LUCID_OK_MSG("Persistent filesystem loaded from disk");
         }
         if (loaded < 0) {
@@ -684,4 +832,15 @@ int ramfs_list(const char *path, char *buffer, size_t capacity, size_t *length)
     }
     *length = used;
     return RAMFS_OK;
+}
+
+int ramfs_is_directory(const char *path)
+{
+    if (!valid_path(path)) return -1;
+    if (string_equal(path, "/system/bin")) return 1;
+    if (is_dynamic_info(path) || userland_find_image(path)) return 0;
+
+    ramfs_node *node = find_node(path);
+    if (!node) return -1;
+    return node->directory ? 1 : 0;
 }

@@ -252,6 +252,12 @@ static value parse_atom(parser *p)
         return result;
     }
 
+    if (string_equal(token, "/")) {
+        value result = make_value(VALUE_PATH);
+        string_copy(result.data.text, token, sizeof(result.data.text));
+        return result;
+    }
+
     for (size_t i = 0; i < sizeof(functions) / sizeof(functions[0]); i++) {
         if (string_equal(token, functions[i].name)) {
             value result = make_value(VALUE_FUNCTION);
@@ -313,6 +319,11 @@ static value parse_expression(parser *p, unsigned int depth)
     p->cursor++;
 
     value function = parse_expression(p, depth + 1);
+    if (function.type == VALUE_PATH &&
+        string_equal(function.data.text, "/")) {
+        function = make_value(VALUE_FUNCTION);
+        function.data.function = FUNCTION_DIVIDE;
+    }
     if (function.type != VALUE_FUNCTION) {
         return make_error("expression must start with a built-in function");
     }

@@ -86,3 +86,18 @@ int ramfs_list(const char *path,
     *length = result;
     return 0;
 }
+
+int ramfs_is_directory(const char *path)
+{
+    size_t path_length = 0;
+    while (path[path_length]) path_length++;
+    uint32_t result = clearsh_syscall(
+        SYS_FS_STAT,
+        (uint32_t)path,
+        path_length,
+        0,
+        0
+    );
+    if (result == SYS_UNKNOWN_TEST) return -1;
+    return result ? 1 : 0;
+}

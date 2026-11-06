@@ -21,13 +21,14 @@ in `/system/info/syscalls`.
 | 5 | `SYS_FS_LIST` | `EBX` path, `ECX` path length, `EDX` output, `ESI` capacity | bytes returned |
 | 6 | `SYS_READKEY` | none | key code |
 | 7 | `SYS_CLEAR` | none | zero |
-| 8 | `SYS_SHUTDOWN` | none | requests machine poweroff |
+| 8 | `SYS_SHUTDOWN` | none | requests ACPI S5 poweroff, with emulator-port fallback |
 | 9 | `SYS_GETTICKS` | none | PIT ticks since boot (100 ticks/second) |
 | 10 | `SYS_FORK` | none | parent gets child PID; child resumes with result 0 |
 | 11 | `SYS_EXEC` | `EBX` path pointer, `ECX` path length | replaces caller with a registered user image; does not return on success |
 | 12 | `SYS_WAIT` | `EBX` child PID | blocks until that child exits, then returns its PID |
 | 13 | `SYS_REAP` | none | releases exited child processes |
 | 14 | `SYS_GET_TERMINAL_SIZE` | none | columns in high 16 bits, rows in low 16 bits |
+| 15 | `SYS_FS_STAT` | `EBX` path, `ECX` path length | 1 for directory, 0 for file |
 
 Clearsh and other user programs can call `lucid_user_syscall()` from
 `recipes/syscall.h` when compiled with `LUCID_USER`. Clearsh also provides a
@@ -46,6 +47,29 @@ common operations.
 optional `sys_readline_completion` structure in `EDX`/`ESI`; it contains the
 current directory, prompt, and newline-separated function names. The kernel
 validates the full structure before using it for Tab completion.
+
+## Syscalls as files
+
+The virtual `/system/syscalls` directory provides file-style access to common
+kernel calls. List its endpoints with `(ls (file /system/syscalls))`. Reading
+or writing an endpoint invokes its syscall; read results are plain text with a
+trailing newline.
+
+| Path | Operation | Behavior |
+|---|---|---|
+| `/system/syscalls/write` | write | Sends the supplied bytes to the terminal |
+| `/system/syscalls/readkey` | read | Waits for a key and returns its numeric key code |
+| `/system/syscalls/clear` | write | Clears the calling process's terminal |
+| `/system/syscalls/shutdown` | write | Requests ACPI S5 poweroff, with emulator-port fallback |
+| `/system/syscalls/get_ticks` | read | Returns PIT ticks since boot |
+| `/system/syscalls/terminal_size` | read | Returns `columns rows` |
+| `/system/syscalls/reap` | read | Reaps exited children and returns the count |
+
+For example, `(write (file /system/syscalls/write) (text "hello\n"))` writes
+to the terminal, while `(print (read (file /system/syscalls/get_ticks)))`
+returns the current tick count. Write-only endpoints reject reads; read-only
+endpoints reject writes. These virtual nodes are not regular RAMFS files and
+cannot be overwritten with file contents.
 
 ## Adding a syscall
 

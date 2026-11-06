@@ -21,6 +21,7 @@
 #define SYS_WAIT 12u
 #define SYS_REAP 13u
 #define SYS_GET_TERMINAL_SIZE 14u
+#define SYS_FS_STAT 15u
 #define SYS_WM_OPEN 0x300u
 #define SYS_WM_EXIT 0x301u
 #define SYS_WM_REAP 0x302u

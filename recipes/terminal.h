@@ -41,6 +41,7 @@ void terminal_set_status(const char *text);
 
 void terminal_putc(char c);
 void terminal_write(const char *s);
+void terminal_flush(void);
 void terminal_clear(void);
 void terminal_cursor_show(void);
 void terminal_cursor_hide(void);

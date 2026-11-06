@@ -3,6 +3,7 @@
 #include "recipes/ramfs.h"
 #include "recipes/status.h"
 #include "recipes/terminal.h"
+#include "recipes/acpi.h"
 #include "recipes/timer.h"
 #include "recipes/usermode.h"
 #include "recipes/vmm.h"
@@ -11,9 +12,15 @@ typedef usermode_frame syscall_frame;
 
 extern void syscall_isr(void);
 
-static inline void outw(uint16_t port, uint16_t value)
+static void poweroff_system(void)
 {
-    __asm__ volatile ("outw %0, %1" : : "a"(value), "Nd"(port));
+    terminal_write("Powering off...\n");
+    terminal_flush();
+    __asm__ volatile ("cli");
+    acpi_poweroff();
+    terminal_write("Poweroff request returned; CPU halted.\n");
+    terminal_flush();
+    for (;;) __asm__ volatile ("hlt");
 }
 
 #define COMMAND_HISTORY_SIZE 8
@@ -29,12 +36,14 @@ typedef struct {
 } readline_state;
 
 static readline_state readline_states[USERMODE_PROCESS_SLOTS];
-static char filesystem_buffer[SYS_FILE_MAX];
+static char filesystem_buffers[USERMODE_PROCESS_SLOTS][SYS_FILE_MAX];
 static char completion_probe[SYS_FILE_MAX];
 static char completion_matches[SYS_FILE_MAX];
 
 #define READLINE_STATE \
     readline_states[usermode_process_current_slot()]
+#define filesystem_buffer \
+    filesystem_buffers[usermode_process_current_slot()]
 #define command_history (READLINE_STATE.command_history)
 #define command_history_count (READLINE_STATE.command_history_count)
 #define command_history_draft (READLINE_STATE.command_history_draft)
@@ -599,6 +608,172 @@ static int bounded_string_length(const char *text,
     return 0;
 }
 
+typedef enum {
+    SYSCALL_FILE_OUTSIDE,
+    SYSCALL_FILE_DIRECTORY,
+    SYSCALL_FILE_UNKNOWN,
+    SYSCALL_FILE_WRITE,
+    SYSCALL_FILE_READKEY,
+    SYSCALL_FILE_CLEAR,
+    SYSCALL_FILE_SHUTDOWN,
+    SYSCALL_FILE_GET_TICKS,
+    SYSCALL_FILE_TERMINAL_SIZE,
+    SYSCALL_FILE_REAP
+} syscall_file_kind;
+
+static int text_equals(const char *left, const char *right)
+{
+    while (*left && *left == *right) {
+        left++;
+        right++;
+    }
+    return *left == *right;
+}
+
+static syscall_file_kind syscall_file_lookup(const char *path)
+{
+    static const char prefix[] = "/system/syscalls";
+    size_t i = 0;
+    while (prefix[i] && path[i] == prefix[i]) i++;
+    if (prefix[i]) return SYSCALL_FILE_OUTSIDE;
+    if (path[i] == '\0' ||
+        (path[i] == '/' && path[i + 1] == '\0')) {
+        return SYSCALL_FILE_DIRECTORY;
+    }
+    if (path[i] != '/') return SYSCALL_FILE_OUTSIDE;
+
+    const char *name = path + i + 1;
+    if (text_equals(name, "write")) return SYSCALL_FILE_WRITE;
+    if (text_equals(name, "readkey")) return SYSCALL_FILE_READKEY;
+    if (text_equals(name, "clear")) return SYSCALL_FILE_CLEAR;
+    if (text_equals(name, "shutdown")) return SYSCALL_FILE_SHUTDOWN;
+    if (text_equals(name, "get_ticks")) return SYSCALL_FILE_GET_TICKS;
+    if (text_equals(name, "terminal_size")) {
+        return SYSCALL_FILE_TERMINAL_SIZE;
+    }
+    if (text_equals(name, "reap")) return SYSCALL_FILE_REAP;
+    return SYSCALL_FILE_UNKNOWN;
+}
+
+static size_t format_decimal(char *buffer, uint32_t number)
+{
+    char digits[10];
+    size_t count = 0;
+    do {
+        digits[count++] = (char)('0' + number % 10);
+        number /= 10;
+    } while (number && count < sizeof(digits));
+    for (size_t i = 0; i < count; i++) {
+        buffer[i] = digits[count - i - 1];
+    }
+    return count;
+}
+
+static int syscall_file_list(const char *path,
+                             char *buffer,
+                             size_t capacity,
+                             size_t *length)
+{
+    static const char *const names[] = {
+        "write", "readkey", "clear", "shutdown",
+        "get_ticks", "terminal_size", "reap"
+    };
+    if (text_equals(path, "/system")) {
+        static const char child[] = "syscalls\n";
+        if (ramfs_list(path, buffer, capacity, length) ||
+            *length + sizeof(child) - 1 > capacity) {
+            return -1;
+        }
+        for (size_t i = 0; i < sizeof(child) - 1; i++) {
+            buffer[(*length)++] = child[i];
+        }
+        return 1;
+    }
+
+    syscall_file_kind kind = syscall_file_lookup(path);
+    if (kind == SYSCALL_FILE_OUTSIDE) return 0;
+    if (kind != SYSCALL_FILE_DIRECTORY) return -1;
+
+    size_t used = 0;
+    for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+        size_t name_length = 0;
+        while (names[i][name_length]) name_length++;
+        if (used + name_length + 1 > capacity) return -1;
+        for (size_t j = 0; j < name_length; j++) {
+            buffer[used++] = names[i][j];
+        }
+        buffer[used++] = '\n';
+    }
+    *length = used;
+    return 1;
+}
+
+static int syscall_file_read(const char *path,
+                             char *buffer,
+                             size_t capacity,
+                             size_t *length)
+{
+    syscall_file_kind kind = syscall_file_lookup(path);
+    if (kind == SYSCALL_FILE_OUTSIDE) return 0;
+    if (kind == SYSCALL_FILE_UNKNOWN ||
+        kind == SYSCALL_FILE_DIRECTORY) {
+        return -1;
+    }
+    if ((kind == SYSCALL_FILE_READKEY || kind == SYSCALL_FILE_REAP) &&
+        capacity < 11) {
+        return -1;
+    }
+
+    char result[32];
+    size_t result_length = 0;
+    if (kind == SYSCALL_FILE_READKEY) {
+        result_length = format_decimal(
+            result, (uint32_t)terminal_getchar()
+        );
+    } else if (kind == SYSCALL_FILE_GET_TICKS) {
+        result_length = format_decimal(result, timer_get_ticks());
+    } else if (kind == SYSCALL_FILE_TERMINAL_SIZE) {
+        uint32_t size = terminal_get_size();
+        result_length = format_decimal(result, size >> 16);
+        result[result_length++] = ' ';
+        result_length += format_decimal(
+            result + result_length, size & 0xFFFFu
+        );
+    } else if (kind == SYSCALL_FILE_REAP) {
+        result_length = format_decimal(result, usermode_process_reap());
+    } else {
+        return -1;
+    }
+
+    result[result_length++] = '\n';
+    if (result_length > capacity) return -1;
+    for (size_t i = 0; i < result_length; i++) {
+        buffer[i] = result[i];
+    }
+    *length = result_length;
+    return 1;
+}
+
+static int syscall_file_write(const char *path,
+                              const char *data,
+                              size_t length)
+{
+    syscall_file_kind kind = syscall_file_lookup(path);
+    if (kind == SYSCALL_FILE_OUTSIDE) return 0;
+    if (kind == SYSCALL_FILE_WRITE) {
+        for (size_t i = 0; i < length; i++) terminal_putc(data[i]);
+        return 1;
+    }
+    if (kind == SYSCALL_FILE_CLEAR) {
+        terminal_clear();
+        return 1;
+    }
+    if (kind == SYSCALL_FILE_SHUTDOWN) {
+        poweroff_system();
+    }
+    return -1;
+}
+
 uint32_t syscall_dispatch(syscall_frame *frame)
 {
     if (frame->eax == SYS_WRITE) {
@@ -912,11 +1087,7 @@ uint32_t syscall_dispatch(syscall_frame *frame)
     }
 
     if (frame->eax == SYS_SHUTDOWN) {
-        terminal_write("Powering off...\n");
-        __asm__ volatile ("cli");
-        outw(0x0604, 0x2000);
-        outw(0xB004, 0x2000);
-        for (;;) __asm__ volatile ("hlt");
+        poweroff_system();
     }
 
     if (frame->eax == SYS_GETTICKS) {
@@ -926,6 +1097,39 @@ uint32_t syscall_dispatch(syscall_frame *frame)
 
     if (frame->eax == SYS_GET_TERMINAL_SIZE) {
         frame->eax = terminal_get_size();
+        return 0;
+    }
+
+    if (frame->eax == SYS_FS_STAT) {
+        char path[SYS_PATH_MAX];
+        if (frame->ecx == 0 || frame->ecx >= sizeof(path) ||
+            !user_range_valid(frame->ebx, frame->ecx, 0)) {
+            frame->eax = SYS_UNKNOWN_TEST;
+            return 0;
+        }
+
+        const char *user_path = (const char *)frame->ebx;
+        for (uint32_t i = 0; i < frame->ecx; i++) path[i] = user_path[i];
+        path[frame->ecx] = '\0';
+
+        syscall_file_kind kind = syscall_file_lookup(path);
+        if (kind == SYSCALL_FILE_DIRECTORY) {
+            frame->eax = 1;
+            return 0;
+        }
+        if (kind != SYSCALL_FILE_OUTSIDE) {
+            if (kind == SYSCALL_FILE_UNKNOWN) {
+                frame->eax = SYS_UNKNOWN_TEST;
+                return 0;
+            }
+            frame->eax = 0;
+            return 0;
+        }
+
+        int is_directory = ramfs_is_directory(path);
+        frame->eax = is_directory < 0
+            ? SYS_UNKNOWN_TEST
+            : (uint32_t)is_directory;
         return 0;
     }
 
@@ -984,7 +1188,12 @@ uint32_t syscall_dispatch(syscall_frame *frame)
         const char *user_path = (const char *)frame->ebx;
         for (uint32_t i = 0; i < frame->ecx; i++) path[i] = user_path[i];
         path[frame->ecx] = '\0';
-        if (ramfs_read(path, filesystem_buffer, frame->esi, &length)) {
+        int syscall_result = syscall_file_read(
+            path, filesystem_buffer, frame->esi, &length
+        );
+        if (syscall_result < 0 ||
+            (syscall_result == 0 &&
+             ramfs_read(path, filesystem_buffer, frame->esi, &length))) {
             frame->eax = SYS_UNKNOWN_TEST;
             return 0;
         }
@@ -1014,9 +1223,18 @@ uint32_t syscall_dispatch(syscall_frame *frame)
         for (uint32_t i = 0; i < frame->esi; i++) {
             filesystem_buffer[i] = user_data[i];
         }
-        if (ramfs_write(path, filesystem_buffer, frame->esi)) {
+        int syscall_result = syscall_file_write(
+            path, filesystem_buffer, frame->esi
+        );
+        if (syscall_result < 0 ||
+            (syscall_result == 0 &&
+             ramfs_write(path, filesystem_buffer, frame->esi))) {
             frame->eax = SYS_UNKNOWN_TEST;
             return 0;
+        }
+        if (text_equals(path, "/system/config/clearsh/zoom") ||
+            text_equals(path, "/system/config/brain.conf")) {
+            terminal_config_reload();
         }
         frame->eax = frame->esi;
         return 0;
@@ -1036,7 +1254,12 @@ uint32_t syscall_dispatch(syscall_frame *frame)
         const char *user_path = (const char *)frame->ebx;
         for (uint32_t i = 0; i < frame->ecx; i++) path[i] = user_path[i];
         path[frame->ecx] = '\0';
-        if (ramfs_list(path, filesystem_buffer, frame->esi, &length)) {
+        int syscall_result = syscall_file_list(
+            path, filesystem_buffer, frame->esi, &length
+        );
+        if (syscall_result < 0 ||
+            (syscall_result == 0 &&
+             ramfs_list(path, filesystem_buffer, frame->esi, &length))) {
             frame->eax = SYS_UNKNOWN_TEST;
             return 0;
         }
