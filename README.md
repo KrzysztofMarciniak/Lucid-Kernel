@@ -11,6 +11,8 @@ A non-POSIX, KISS kernel. Everything is a file.
 - **Everything is a file** — processes, devices, IPC, network, memory: all reachable and
   controllable through one namespace. No ioctl. No sysctl. No hidden side channels.
 
+![Terminal Screenshot](screenshot.png)
+
 ## Hardware Requirements (minimum)
 
 - CPU: 2+ cores, 32-bit or above
