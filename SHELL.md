@@ -26,8 +26,17 @@ immediately. For example:
 (write (file /system/config/clearsh/zoom) (text "2"))
 ```
 
-VGA text mode remains at its native size. Tab completes Clearsh function names
-and unquoted paths inside `(file ...)`; a unique match is inserted, while
+On framebuffer systems, `/system/config/resolution` selects a 32-bit VBE
+linear-framebuffer mode at runtime. For example:
+
+```lisp
+(write (file /system/config/resolution) (text "800x600x32\n"))
+```
+
+Only modes exposed by the firmware are available; an unsupported mode leaves
+the current display unchanged. VGA text mode cannot change pixel resolution.
+Tab completes Clearsh function names and unquoted paths inside `(file ...)`;
+a unique match is inserted, while
 multiple matches extend the common prefix and list candidates.
 Opening parentheses and quotes insert their matching closer; unmatched closers
 are completed when the line is submitted. Serial terminals may use ANSI
@@ -59,8 +68,9 @@ with `/`. Quoted strings support `\n`, `\t`, `\"`, and `\\` escapes.
 `file` normalizes relative paths and `..`. `read` and `write` operate on files;
 `ls` lists a directory, `cd` changes the current directory, and `pwd` returns
 it. The filesystem includes `/system/info`, `/system/config/clearsh`,
-`/system/config/pioneer`, `/users/root`, `/tmp`, and the root-level guides
-`/README.TXT`, `/CLEARSH.TXT`, `/BRAIN.TXT`, and `/SYSTEM.TXT`. Read the guide
+`/system/config/pioneer`, `/system/config/resolution`, `/system/processes`,
+`/users/root`, `/tmp`, and the root-level guides `/README.TXT`, `/CLEARSH.TXT`,
+`/BRAIN.TXT`, and `/SYSTEM.TXT`. Read the guide
 index with `(print (read (file /README.TXT)))`. It supports 64 entries, paths
 up to 255 characters, and files up to 4096 bytes. Disk-image boots preserve
 changes across reboots.
@@ -131,6 +141,17 @@ children. `clear` and `shutdown` are write-only control files, and writing to
 `shutdown` powers off the machine. The directory is virtual; its endpoint
 files cannot be replaced with ordinary file contents. See `SYSCALLS.md` for
 the full endpoint list and per-file behavior.
+
+The virtual `/system/processes` directory provides a process table and a
+service control endpoint:
+
+```lisp
+(print (read (file /system/processes/list)))
+(write (file /system/processes/kill) (text "brain"))
+```
+
+`kill` accepts an image path or a unique image basename. It cannot terminate
+the current process or PID 1; ambiguous or missing names return an error.
 
 ## Other functions
 

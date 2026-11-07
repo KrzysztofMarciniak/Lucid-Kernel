@@ -13,7 +13,6 @@ static uint32_t launch_eye(void)
 {
     uint32_t pid = lucid_user_syscall(SYS_FORK, 0, 0, 0, 0);
     if (pid != 0 && pid != SYS_UNKNOWN_TEST) {
-        write_text("Brain: Eye started\n");
         return pid;
     }
     if (pid == SYS_UNKNOWN_TEST) return pid;
@@ -28,7 +27,6 @@ static uint32_t launch_eye(void)
 __attribute__((section(".entry")))
 void brain_user_entry(void)
 {
-    write_text("Brain: starting Eye\n");
     if (launch_eye() == SYS_UNKNOWN_TEST) {
         write_text("Brain: could not create Eye process\n");
     }

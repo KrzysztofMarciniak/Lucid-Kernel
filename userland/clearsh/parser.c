@@ -81,6 +81,91 @@ int clearsh_function_candidates(char *buffer,
     return 1;
 }
 
+static size_t edit_distance(const char *left, const char *right)
+{
+    uint16_t older[PATH_MAX];
+    uint16_t previous[PATH_MAX];
+    uint16_t current[PATH_MAX];
+    size_t left_length = string_length(left);
+    size_t right_length = string_length(right);
+    if (left_length >= PATH_MAX || right_length >= PATH_MAX) {
+        return PATH_MAX;
+    }
+
+    for (size_t j = 0; j <= right_length; j++) {
+        previous[j] = (uint16_t)j;
+    }
+    for (size_t i = 1; i <= left_length; i++) {
+        current[0] = (uint16_t)i;
+        for (size_t j = 1; j <= right_length; j++) {
+            uint16_t substitution = (uint16_t)(
+                previous[j - 1] + (left[i - 1] != right[j - 1])
+            );
+            uint16_t insertion = (uint16_t)(current[j - 1] + 1);
+            uint16_t deletion = (uint16_t)(previous[j] + 1);
+            uint16_t best = substitution;
+            if (insertion < best) best = insertion;
+            if (deletion < best) best = deletion;
+            if (i > 1 && j > 1 &&
+                left[i - 1] == right[j - 2] &&
+                left[i - 2] == right[j - 1] &&
+                older[j - 2] + 1 < best) {
+                best = (uint16_t)(older[j - 2] + 1);
+            }
+            current[j] = best;
+        }
+        for (size_t j = 0; j <= right_length; j++) {
+            older[j] = previous[j];
+            previous[j] = current[j];
+        }
+    }
+    return previous[right_length];
+}
+
+static value unknown_function_error(const char *name)
+{
+    const char *suggestion = 0;
+    size_t best_distance = PATH_MAX;
+    size_t name_length = string_length(name);
+    size_t function_count = sizeof(functions) / sizeof(functions[0]);
+    for (size_t i = 0; i < function_count; i++) {
+        size_t distance = edit_distance(name, functions[i].name);
+        if (distance < best_distance) {
+            best_distance = distance;
+            suggestion = functions[i].name;
+        }
+    }
+
+    char message[TEXT_MAX];
+    size_t used = 0;
+    static const char prefix[] = "unknown command '";
+    static const char middle[] = "'; did you mean '";
+    static const char suffix[] = "'?";
+    static const char no_suggestion_suffix[] = "'";
+    size_t max_distance = name_length < 4 ? 1 : 2;
+    int has_suggestion = suggestion && best_distance <= max_distance;
+    const char *parts[5];
+    size_t part_count = 0;
+    parts[part_count++] = prefix;
+    parts[part_count++] = name;
+    if (has_suggestion) {
+        parts[part_count++] = middle;
+        parts[part_count++] = suggestion;
+        parts[part_count++] = suffix;
+    } else {
+        parts[part_count++] = no_suggestion_suffix;
+    }
+
+    for (size_t part = 0; part < part_count; part++) {
+        const char *text = parts[part];
+        while (*text && used + 1 < sizeof(message)) {
+            message[used++] = *text++;
+        }
+    }
+    message[used] = '\0';
+    return make_error(message);
+}
+
 static void skip_space(parser *p)
 {
     while (*p->cursor == ' ' || *p->cursor == '\t' ||
@@ -325,6 +410,9 @@ static value parse_expression(parser *p, unsigned int depth)
         function.data.function = FUNCTION_DIVIDE;
     }
     if (function.type != VALUE_FUNCTION) {
+        if (function.type == VALUE_PATH) {
+            return unknown_function_error(function.data.text);
+        }
         return make_error("expression must start with a built-in function");
     }
     if (function.data.function == FUNCTION_LAMBDA) {

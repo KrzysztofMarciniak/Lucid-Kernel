@@ -610,8 +610,28 @@ int syscall_text_equals(const char *left, const char *right)
 
 syscall_file_kind syscall_file_lookup(const char *path)
 {
-    static const char prefix[] = "/system/syscalls";
+    static const char processes[] = "/system/processes";
     size_t i = 0;
+    while (processes[i] && path[i] == processes[i]) i++;
+    if (!processes[i]) {
+        if (path[i] == '\0' ||
+            (path[i] == '/' && path[i + 1] == '\0')) {
+            return SYSCALL_FILE_DIRECTORY;
+        }
+        if (path[i] == '/') {
+            const char *name = path + i + 1;
+            if (syscall_text_equals(name, "list")) {
+                return SYSCALL_FILE_PROCESS_LIST;
+            }
+            if (syscall_text_equals(name, "kill")) {
+                return SYSCALL_FILE_PROCESS_KILL;
+            }
+            return SYSCALL_FILE_UNKNOWN;
+        }
+    }
+
+    static const char prefix[] = "/system/syscalls";
+    i = 0;
     while (prefix[i] && path[i] == prefix[i]) i++;
     if (prefix[i]) return SYSCALL_FILE_OUTSIDE;
     if (path[i] == '\0' ||
@@ -652,12 +672,13 @@ int syscall_file_list(const char *path,
                       size_t capacity,
                       size_t *length)
 {
-    static const char *const names[] = {
+    static const char *const syscall_names[] = {
         "write", "readkey", "clear", "shutdown",
         "get_ticks", "terminal_size", "reap"
     };
+    static const char *const process_names[] = { "kill", "list" };
     if (syscall_text_equals(path, "/system")) {
-        static const char child[] = "syscalls\n";
+        static const char child[] = "processes\nsyscalls\n";
         if (ramfs_list(path, buffer, capacity, length) ||
             *length + sizeof(child) - 1 > capacity) {
             return -1;
@@ -672,8 +693,16 @@ int syscall_file_list(const char *path,
     if (kind == SYSCALL_FILE_OUTSIDE) return 0;
     if (kind != SYSCALL_FILE_DIRECTORY) return -1;
 
+    const char *const *names = syscall_names;
+    size_t name_count = sizeof(syscall_names) / sizeof(syscall_names[0]);
+    if (syscall_text_equals(path, "/system/processes") ||
+        syscall_text_equals(path, "/system/processes/")) {
+        names = process_names;
+        name_count = sizeof(process_names) / sizeof(process_names[0]);
+    }
+
     size_t used = 0;
-    for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+    for (size_t i = 0; i < name_count; i++) {
         size_t name_length = 0;
         while (names[i][name_length]) name_length++;
         if (used + name_length + 1 > capacity) return -1;
@@ -697,6 +726,10 @@ int syscall_file_read(const char *path,
         kind == SYSCALL_FILE_DIRECTORY) {
         return -1;
     }
+    if (kind == SYSCALL_FILE_PROCESS_LIST) {
+        return usermode_process_info(buffer, capacity, length) ? -1 : 1;
+    }
+    if (kind == SYSCALL_FILE_PROCESS_KILL) return -1;
     if ((kind == SYSCALL_FILE_READKEY || kind == SYSCALL_FILE_REAP) &&
         capacity < 11) {
         return -1;
@@ -737,6 +770,23 @@ int syscall_file_write(const char *path,
                        size_t length)
 {
     syscall_file_kind kind = syscall_file_lookup(path);
+    if (kind == SYSCALL_FILE_PROCESS_KILL) {
+        char name[SYS_PATH_MAX];
+        while (length &&
+               (data[length - 1] == '\n' || data[length - 1] == '\r')) {
+            length--;
+        }
+        if (length == 0 || length >= sizeof(name)) return -1;
+        for (size_t i = 0; i < length; i++) {
+            if (data[i] == '\0' || data[i] == '\n' || data[i] == '\r') {
+                return -1;
+            }
+            name[i] = data[i];
+        }
+        name[length] = '\0';
+        return usermode_process_kill(name) == 1 ? 1 : -1;
+    }
+    if (kind == SYSCALL_FILE_PROCESS_LIST) return -1;
     if (kind == SYSCALL_FILE_OUTSIDE) return 0;
     if (kind == SYSCALL_FILE_WRITE) {
         for (size_t i = 0; i < length; i++) terminal_putc(data[i]);

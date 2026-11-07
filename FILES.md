@@ -199,6 +199,8 @@ Information about running processes.
 
 ```text
 /system/processes/
+├── list
+├── kill
 ├── 0/
 │   ├── name
 │   ├── status

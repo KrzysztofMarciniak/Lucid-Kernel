@@ -2,6 +2,7 @@
 #include "recipes/ramfs.h"
 #include "recipes/status.h"
 #include "recipes/usermode.h"
+#include "recipes/vmm.h"
 #include "stdint.h"
 #include "stddef.h"
 #include "multiboot.h"
@@ -15,6 +16,38 @@
 #define TERMINAL_ZOOM_MAX 4
 #define TERMINAL_STATUS_MAX 64
 #define TERMINAL_BAR_WIDTH 14
+#define VBE_CONTROL_INFO_SIZE 512u
+#define VBE_MODE_LIST_MAX 1024u
+#define VBE_MODE_INFO_ADDRESS 0x1F000u
+#define VBE_TRAMPOLINE_ADDRESS 0x30000u
+#define VBE_SCRATCH_ADDRESS 0x1E000u
+#define VBE_TRAMPOLINE_LIMIT 0x10000u
+
+typedef struct __attribute__((packed)) {
+    uint16_t attributes;
+    uint8_t reserved0[14];
+    uint16_t bytes_per_scan_line;
+    uint16_t x_resolution;
+    uint16_t y_resolution;
+    uint8_t reserved1[3];
+    uint8_t bits_per_pixel;
+    uint8_t reserved2;
+    uint8_t memory_model;
+    uint8_t reserved3[3];
+    uint8_t red_mask_size;
+    uint8_t red_field_position;
+    uint8_t green_mask_size;
+    uint8_t green_field_position;
+    uint8_t blue_mask_size;
+    uint8_t blue_field_position;
+    uint8_t reserved_mask_size;
+    uint8_t reserved_field_position;
+    uint8_t direct_color_info;
+    uint32_t physical_base;
+} vbe_mode_info;
+
+extern uint8_t vbe_trampoline_start[];
+extern uint8_t vbe_trampoline_end[];
 
 typedef enum {
     TERMINAL_BAR_TOP,
@@ -56,6 +89,7 @@ static uint32_t framebuffer_width;
 static uint32_t framebuffer_height;
 static uint32_t framebuffer_foreground;
 static uint32_t framebuffer_background;
+static uint32_t vbe_control_info;
 static const char *framebuffer_status =
     "GRUB did not provide a framebuffer; using VGA output";
 static terminal_surface terminal_surfaces[USERMODE_PROCESS_SLOTS];
@@ -64,6 +98,232 @@ static terminal_bar_position terminal_bar = TERMINAL_BAR_TOP;
 static uint32_t terminal_zoom = 1;
 static int terminal_config_loaded;
 static char terminal_status[TERMINAL_STATUS_MAX] = "Ready";
+
+static uint16_t read_u16(const volatile uint8_t *bytes)
+{
+    return (uint16_t)bytes[0] | ((uint16_t)bytes[1] << 8);
+}
+
+static uint32_t read_u32(const volatile uint8_t *bytes)
+{
+    return (uint32_t)bytes[0] |
+           ((uint32_t)bytes[1] << 8) |
+           ((uint32_t)bytes[2] << 16) |
+           ((uint32_t)bytes[3] << 24);
+}
+
+static uint16_t vbe_bios_call(uint16_t function,
+                             uint16_t ebx,
+                             uint16_t ecx)
+{
+    size_t code_length = (size_t)(vbe_trampoline_end -
+                                  vbe_trampoline_start);
+    if (code_length == 0 || code_length >= VBE_TRAMPOLINE_LIMIT) {
+        return 0;
+    }
+
+    volatile uint8_t *destination =
+        (volatile uint8_t *)VBE_TRAMPOLINE_ADDRESS;
+    for (size_t i = 0; i < code_length; i++) {
+        destination[i] = vbe_trampoline_start[i];
+    }
+
+    typedef uint32_t (*vbe_call_fn)(uint32_t, uint32_t, uint32_t);
+    vbe_call_fn call = (vbe_call_fn)VBE_TRAMPOLINE_ADDRESS;
+    return (uint16_t)call(function, ebx, ecx);
+}
+
+static int ranges_overlap(uint32_t first,
+                          uint32_t first_length,
+                          uint32_t second,
+                          uint32_t second_length)
+{
+    uint64_t first_end = (uint64_t)first + first_length;
+    uint64_t second_end = (uint64_t)second + second_length;
+    return first < second_end && second < first_end;
+}
+
+static int parse_resolution(const char *text,
+                            size_t length,
+                            uint32_t *width,
+                            uint32_t *height)
+{
+    size_t end = length;
+    while (end && (text[end - 1] == '\n' || text[end - 1] == '\r')) end--;
+
+    uint32_t values[3] = { 0, 0, 0 };
+    size_t field = 0;
+    for (size_t i = 0; i < end; i++) {
+        char c = text[i];
+        if (c == 'x' && field < 2 && values[field]) {
+            field++;
+            continue;
+        }
+        if (c < '0' || c > '9' ||
+            values[field] > (8192u - (uint32_t)(c - '0')) / 10u) {
+            return 0;
+        }
+        values[field] = values[field] * 10u + (uint32_t)(c - '0');
+    }
+
+    if (field != 2 || values[2] != 32 ||
+        values[0] < CURIE_WIDTH || values[0] > 8192 ||
+        values[1] < CURIE_HEIGHT || values[1] > 4320) {
+        return 0;
+    }
+    *width = values[0];
+    *height = values[1];
+    return 1;
+}
+
+static int find_vbe_mode(uint32_t width,
+                         uint32_t height,
+                         uint16_t *mode,
+                         vbe_mode_info *selected)
+{
+    if (!vbe_control_info ||
+        vbe_control_info > 0xA0000u - VBE_CONTROL_INFO_SIZE) {
+        return 0;
+    }
+    const volatile uint8_t *control =
+        (const volatile uint8_t *)vbe_control_info;
+    if (control[0] != 'V' || control[1] != 'E' ||
+        control[2] != 'S' || control[3] != 'A') {
+        return 0;
+    }
+
+    uint16_t list_offset = read_u16(control + 14);
+    uint16_t list_segment = read_u16(control + 16);
+    uint32_t mode_list =
+        ((uint32_t)list_segment << 4) + list_offset;
+    uint32_t code_length =
+        (uint32_t)(vbe_trampoline_end - vbe_trampoline_start);
+    const uint32_t mode_list_bytes = VBE_MODE_LIST_MAX * 2u;
+    if (mode_list == 0 || mode_list > 0xA0000u - mode_list_bytes ||
+        ranges_overlap(vbe_control_info, VBE_CONTROL_INFO_SIZE,
+                       VBE_SCRATCH_ADDRESS, 64) ||
+        ranges_overlap(vbe_control_info, VBE_CONTROL_INFO_SIZE,
+                       VBE_MODE_INFO_ADDRESS, 256) ||
+        ranges_overlap(vbe_control_info, VBE_CONTROL_INFO_SIZE,
+                       VBE_TRAMPOLINE_ADDRESS, code_length) ||
+        ranges_overlap(vbe_control_info, VBE_CONTROL_INFO_SIZE,
+                       0x40000, 0x10000) ||
+        ranges_overlap(vbe_control_info, VBE_CONTROL_INFO_SIZE,
+                       mode_list, mode_list_bytes) ||
+        ranges_overlap(mode_list, mode_list_bytes,
+                       VBE_SCRATCH_ADDRESS, 64) ||
+        ranges_overlap(mode_list, mode_list_bytes,
+                       VBE_MODE_INFO_ADDRESS, 256) ||
+        ranges_overlap(mode_list, mode_list_bytes,
+                       VBE_TRAMPOLINE_ADDRESS, code_length) ||
+        ranges_overlap(mode_list, mode_list_bytes, 0x40000, 0x10000)) {
+        return 0;
+    }
+
+    const volatile uint8_t *list =
+        (const volatile uint8_t *)mode_list;
+    for (uint32_t i = 0; i < VBE_MODE_LIST_MAX; i++) {
+        if (mode_list + i * 2u > 0xA0000u - 2u) return 0;
+        uint16_t candidate = read_u16(list + i * 2u);
+        if (candidate == 0xFFFFu) break;
+        if (vbe_bios_call(0x4F01u, 0, candidate) != 0x004Fu) continue;
+
+        const volatile uint8_t *mode_bytes =
+            (const volatile uint8_t *)VBE_MODE_INFO_ADDRESS;
+        volatile const vbe_mode_info *info =
+            (volatile const vbe_mode_info *)mode_bytes;
+        if ((info->attributes & 0x0091u) != 0x0091u ||
+            info->x_resolution != width ||
+            info->y_resolution != height ||
+            info->bits_per_pixel != 32 ||
+            info->memory_model != 6 ||
+            info->bytes_per_scan_line < width * 4u) {
+            continue;
+        }
+
+        *mode = candidate;
+        uint8_t *destination = (uint8_t *)selected;
+        for (size_t j = 0; j < sizeof(*selected); j++) {
+            destination[j] = mode_bytes[j];
+        }
+        return 1;
+    }
+    return 0;
+}
+
+static int map_vbe_framebuffer(uint32_t address, uint32_t length)
+{
+    uint32_t start = address & ~0xFFFu;
+    uint32_t end = (address + length + 0xFFFu) & ~0xFFFu;
+    const uint32_t identity_limit = 0x400000u;
+    if (start < identity_limit) start = identity_limit;
+    if (start >= end) return 1;
+
+    lucid_status status = vmm_map_kernel_range(
+        start, start, end - start, VMM_KERNEL | VMM_WRITABLE
+    );
+    return status.ok == 0;
+}
+
+static void apply_resolution_config(void)
+{
+    static const char path[] = "/system/config/resolution";
+    char config[32];
+    size_t length = 0;
+    if (ramfs_read(path, config, sizeof(config), &length) != 0) {
+        terminal_set_status("Display resolution config unreadable");
+        return;
+    }
+
+    uint32_t width;
+    uint32_t height;
+    if (!parse_resolution(config, length, &width, &height)) {
+        terminal_set_status("Invalid display resolution");
+        return;
+    }
+    if (framebuffer && framebuffer_width == width &&
+        framebuffer_height == height) {
+        return;
+    }
+    if (!framebuffer) {
+        terminal_set_status("VBE framebuffer unavailable");
+        return;
+    }
+
+    uint16_t mode = 0;
+    vbe_mode_info info;
+    if (!find_vbe_mode(width, height, &mode, &info)) {
+        terminal_set_status("VBE resolution is unavailable");
+        return;
+    }
+
+    uint64_t length64 =
+        (uint64_t)info.bytes_per_scan_line * info.y_resolution;
+    uint64_t end = (uint64_t)info.physical_base + length64;
+    if (info.physical_base == 0 ||
+        length64 == 0 || length64 > 64u * 1024u * 1024u ||
+        end > 0xFFFFF000ULL ||
+        !map_vbe_framebuffer(info.physical_base, (uint32_t)length64)) {
+        terminal_set_status("VBE framebuffer mapping failed");
+        return;
+    }
+
+    if (vbe_bios_call(0x4F02u, (uint16_t)(mode | 0x4000u), 0) != 0x004Fu) {
+        terminal_set_status("VBE mode change failed");
+        return;
+    }
+
+    framebuffer_phys = info.physical_base;
+    framebuffer_length = (uint32_t)length64;
+    framebuffer_pitch = info.bytes_per_scan_line;
+    framebuffer_width = info.x_resolution;
+    framebuffer_height = info.y_resolution;
+    framebuffer = (volatile uint8_t *)framebuffer_phys;
+    framebuffer_foreground = 0xFFFFFFFFu;
+    framebuffer_background = 0;
+    framebuffer_status = "Runtime VBE framebuffer active";
+    terminal_set_status("Display resolution changed");
+}
 static int left_shift;
 static int right_shift;
 static int left_control;
@@ -187,6 +447,19 @@ static uint32_t screen_rows(void)
     return rows;
 }
 
+static void update_surface_dimensions(void)
+{
+    uint32_t columns = screen_columns();
+    uint32_t rows = screen_rows();
+    for (uint32_t slot = 0; slot < USERMODE_PROCESS_SLOTS; slot++) {
+        terminal_surface *surface = &terminal_surfaces[slot];
+        surface->columns = columns;
+        surface->rows = rows;
+        if (surface->row >= rows) surface->row = rows - 1;
+        if (surface->column >= columns) surface->column = columns - 1;
+    }
+}
+
 static void surface_clear(terminal_surface *surface)
 {
     for (uint32_t row = 0; row < TERMINAL_MAX_ROWS; row++) {
@@ -247,6 +520,8 @@ static void load_terminal_config(void)
             terminal_set_status(invalid);
         }
     }
+
+    apply_resolution_config();
 
     static const char path[] = "/system/config/brain.conf";
     char config[128];
@@ -588,6 +863,7 @@ void terminal_refresh(void)
 {
     initialize_surfaces();
     refresh_window_layout();
+    update_surface_dimensions();
     if (framebuffer) {
         framebuffer_clear();
     } else {
@@ -1019,9 +1295,11 @@ lucid_status terminal_pre(void)
 
 void terminal_set_boot_info(const multiboot_info *info)
 {
-    if (!info || !(info->flags & MULTIBOOT_INFO_FRAMEBUFFER)) {
-        return;
+    if (!info) return;
+    if (info->flags & MULTIBOOT_INFO_VBE) {
+        vbe_control_info = info->vbe_control_info;
     }
+    if (!(info->flags & MULTIBOOT_INFO_FRAMEBUFFER)) return;
 
     if (info->framebuffer_type != MULTIBOOT_FRAMEBUFFER_RGB ||
         info->framebuffer_bpp != 32) {

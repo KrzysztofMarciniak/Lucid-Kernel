@@ -29,6 +29,10 @@ lucid_status vmm_map_phys(uint32_t virt, uint32_t phys, uint32_t flags);
    applied to every page. length is rounded up to a page boundary.
    convenience wrapper -- loops over vmm_map_phys internally. */
 lucid_status vmm_map_range(uint32_t virt, uint32_t phys, uint32_t length, uint32_t flags);
+lucid_status vmm_map_kernel_range(uint32_t virt,
+                                  uint32_t phys,
+                                  uint32_t length,
+                                  uint32_t flags);
 
 lucid_status vmm_unmap(uint32_t virt);
 

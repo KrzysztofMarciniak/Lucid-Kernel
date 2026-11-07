@@ -72,5 +72,6 @@ uint32_t usermode_process_current_desktop(void);
 uint32_t usermode_process_window_desktop(uint32_t slot);
 uint32_t usermode_process_master_ratio(void);
 int usermode_process_info(char *buffer, size_t capacity, size_t *length);
+int usermode_process_kill(const char *name);
 
 #endif

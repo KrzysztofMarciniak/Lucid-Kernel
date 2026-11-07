@@ -4,12 +4,19 @@
 #include "stdint.h"
 
 #define MULTIBOOT_BOOTLOADER_MAGIC 0x2BADB002
+#define MULTIBOOT_INFO_VBE (1u << 11)
 #define MULTIBOOT_INFO_FRAMEBUFFER (1u << 12)
 #define MULTIBOOT_FRAMEBUFFER_RGB 1
 
 typedef struct __attribute__((packed)) multiboot_info {
     uint32_t flags;
-    uint32_t reserved[21];
+    uint32_t reserved[17];
+    uint32_t vbe_control_info;
+    uint32_t vbe_mode_info;
+    uint16_t vbe_mode;
+    uint16_t vbe_interface_seg;
+    uint16_t vbe_interface_off;
+    uint16_t vbe_interface_len;
     uint64_t framebuffer_addr;
     uint32_t framebuffer_pitch;
     uint32_t framebuffer_width;

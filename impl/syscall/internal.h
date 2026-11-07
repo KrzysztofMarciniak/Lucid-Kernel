@@ -22,7 +22,9 @@ typedef enum {
     SYSCALL_FILE_SHUTDOWN,
     SYSCALL_FILE_GET_TICKS,
     SYSCALL_FILE_TERMINAL_SIZE,
-    SYSCALL_FILE_REAP
+    SYSCALL_FILE_REAP,
+    SYSCALL_FILE_PROCESS_LIST,
+    SYSCALL_FILE_PROCESS_KILL
 } syscall_file_kind;
 
 #define SYSCALL_HANDLER(symbol, syscall_number, callback) \

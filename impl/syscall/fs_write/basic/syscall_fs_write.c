@@ -28,7 +28,8 @@ static uint32_t syscall_fs_write_handle(syscall_frame *frame)
         return 0;
     }
     if (syscall_text_equals(path, "/system/config/clearsh/zoom") ||
-        syscall_text_equals(path, "/system/config/brain.conf")) {
+        syscall_text_equals(path, "/system/config/brain.conf") ||
+        syscall_text_equals(path, "/system/config/resolution")) {
         terminal_config_reload();
     }
     frame->eax = frame->esi;

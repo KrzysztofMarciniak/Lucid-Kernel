@@ -485,24 +485,48 @@ int usermode_process_exec(const char *path, usermode_frame *frame)
         process->is_window = 1;
         process->desktop = current_desktop;
         focused_slot = usermode_process_current_slot();
-        terminal_set_status("Eye started");
         terminal_refresh();
     }
     return 1;
 }
 
-void usermode_process_exit(uint32_t status)
+static int process_name_matches(const char *name, const char *image)
 {
-    process *exiting = current();
+    if (!name || !image) return 0;
+    const char *image_base = image;
+    for (const char *cursor = image; *cursor; cursor++) {
+        if (*cursor == '/') image_base = cursor + 1;
+    }
+
+    const char *left = name;
+    const char *right = image;
+    while (*left && *right && *left == *right) {
+        left++;
+        right++;
+    }
+    if (!*left && !*right) return 1;
+
+    left = name;
+    right = image_base;
+    while (*left && *right && *left == *right) {
+        left++;
+        right++;
+    }
+    return !*left && !*right;
+}
+
+static int process_mark_exited(process *exiting, uint32_t status)
+{
     exiting->exit_status = status;
     exiting->state = PROCESS_EXITED;
     if (exiting->is_window) {
-        uint32_t slot = usermode_process_current_slot();
+        uint32_t slot = exiting == &root_process
+            ? 0
+            : (uint32_t)(exiting - process_table) + 1;
         if (focused_slot == slot) {
             focused_slot = next_window_slot(slot, 1);
         }
         enqueue_key(window_manager_slot, SYS_WM_REAP);
-        terminal_set_status("Eye exited");
         terminal_refresh();
     }
     if (exiting->parent &&
@@ -514,7 +538,37 @@ void usermode_process_exit(uint32_t status)
         exiting->parent->wait_pid = 0;
         exiting->parent->state = PROCESS_READY;
         exiting->reap_on_switch = 1;
+        return 1;
     }
+    return 0;
+}
+
+void usermode_process_exit(uint32_t status)
+{
+    process_mark_exited(current(), status);
+}
+
+int usermode_process_kill(const char *name)
+{
+    if (!name || !*name) return 0;
+
+    process *match = 0;
+    for (uint32_t i = 0; i < PROCESS_LIMIT; i++) {
+        process *entry = &process_table[i];
+        if (!entry->in_use || entry->state == PROCESS_EXITED ||
+            entry == current_process || !entry->name ||
+            !process_name_matches(name, entry->name)) {
+            continue;
+        }
+        if (match) return -1;
+        match = entry;
+    }
+    if (!match) return 0;
+
+    if (process_mark_exited(match, SYS_UNKNOWN_TEST)) {
+        release_process(match);
+    }
+    return 1;
 }
 
 static int append_process_text(char *buffer,

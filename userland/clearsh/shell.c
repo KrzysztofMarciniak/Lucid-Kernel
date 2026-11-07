@@ -2,6 +2,28 @@
 
 static unsigned int script_depth;
 
+#ifdef LUCID_TEST_MODE
+static void test_unknown_command_errors(void)
+{
+    value result = evaluate_line("(pritn)");
+    if (result.type != VALUE_ERROR ||
+        !string_equal(result.data.text,
+                      "unknown command 'pritn'; did you mean 'print'?")) {
+        for (;;) {
+            __asm__ volatile ("pause");
+        }
+    }
+
+    result = evaluate_line("(zzzzzzzzzz)");
+    if (result.type != VALUE_ERROR ||
+        !string_equal(result.data.text, "unknown command 'zzzzzzzzzz'")) {
+        for (;;) {
+            __asm__ volatile ("pause");
+        }
+    }
+}
+#endif
+
 static value run_script_body(const value *file)
 {
     char source[TEXT_MAX];
@@ -74,7 +96,6 @@ static void run_pioneer_scripts(void)
     size_t length = 0;
     if (ramfs_read("/system/config/pioneer/boot",
                    source, sizeof(source) - 1, &length)) {
-        terminal_write("Pioneer: no boot script list; starting shell.\n");
         return;
     }
     source[length] = '\0';
@@ -136,9 +157,6 @@ static void run_pioneer_scripts(void)
         }
         value file = make_value(VALUE_FILE);
         string_copy(file.data.text, resolved, sizeof(file.data.text));
-        terminal_write("Pioneer: running ");
-        terminal_write(resolved);
-        terminal_putc('\n');
         arena_used = 0;
         (void)run_script(&file);
     }
@@ -231,7 +249,9 @@ static void shell_loop(void)
 __attribute__((section(".entry")))
 void clearsh_user_entry(void)
 {
-    terminal_write("\nClearsh Lisp shell\n");
+#ifdef LUCID_TEST_MODE
+    test_unknown_command_errors();
+#endif
     run_pioneer_scripts();
     shell_loop();
 }

@@ -17,7 +17,7 @@
 #include "gdt_defs.h"
 #include "internal.h"
 
-#define GDT_ENTRIES 6
+#define GDT_ENTRIES 7
 
 static struct gdt_entry gdt[GDT_ENTRIES] __attribute__((aligned(8)));
 static struct gdt_ptr   gdtp;
@@ -77,9 +77,12 @@ lucid_status gdt_init(void) {
         GRAN_4K_32BIT); /* user data */
 
     tss_install(5, SEL_KERNEL_DATA, 0);
+    gdt_set_gate(6, 0x30000, 0xFFFF,
+        SEG_PRESENT | SEG_DPL0 | SEG_S_NORMAL | SEG_EXEC | SEG_RW,
+        0); /* 16-bit VBE trampoline code */
 
     return LUCID_OK_MSG(
-        "GDT built (6 entries: null, kernel code, kernel data, user code, user data, TSS)"
+        "GDT built (7 entries: null, kernel code, kernel data, user code, user data, TSS, VBE)"
     );
 }
 lucid_status gdt_post(void) {

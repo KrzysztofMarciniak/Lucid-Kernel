@@ -416,6 +416,11 @@ value call_function(function_id id, value *args, size_t count)
             return make_error("write value cannot be converted to text");
         }
         if (ramfs_write(args[0].data.text, text, string_length(text))) {
+            if (string_equal(args[0].data.text, "/system/processes/kill")) {
+                return make_error(
+                    "kill requires one unique active process; the current process and PID 1 are protected"
+                );
+            }
             return make_error("file could not be written");
         }
         return make_value(VALUE_NIL);

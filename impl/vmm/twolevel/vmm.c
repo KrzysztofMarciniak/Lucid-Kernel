@@ -337,6 +337,54 @@ lucid_status vmm_map_range(
     return LUCID_OK;
 }
 
+lucid_status vmm_map_kernel_range(uint32_t virt,
+                                  uint32_t phys,
+                                  uint32_t length,
+                                  uint32_t flags)
+{
+    uint64_t end = (uint64_t)virt + length;
+    if (!length || end > 0xFFFFF000ULL ||
+        !(flags & VMM_KERNEL) || (flags & VMM_USER)) {
+        return LUCID_FAIL_EX(
+            1,
+            "Kernel mapping rejected",
+            "invalid range or user-accessible flags",
+            "provide a valid supervisor-only mapping"
+        );
+    }
+
+    vmm_space *previous_space = active_space;
+    uint32_t *previous_pd = active_pd;
+    lucid_status status = LUCID_OK;
+
+    active_space = &kernel_space;
+    active_pd = kernel_space.directory;
+    status = vmm_map_range(virt, phys, length, flags);
+    if (status.ok != 0) goto restore_active_space;
+
+    for (uint32_t i = 0; i < VMM_MAX_SPACES; i++) {
+        vmm_space *space = &space_pool[i];
+        if (!space->in_use) continue;
+        active_space = space;
+        active_pd = space->directory;
+        status = vmm_map_range(virt, phys, length, flags);
+        if (status.ok != 0) goto restore_active_space;
+    }
+
+restore_active_space:
+    active_space = previous_space;
+    active_pd = previous_pd;
+    if (status.ok == 0) {
+        uint32_t start = PAGE_ALIGN_DOWN(virt);
+        uint32_t map_end = PAGE_ALIGN_UP((uint32_t)end);
+        for (uint32_t address = start; address < map_end;
+             address += PAGE_SIZE) {
+            tlb_flush(address);
+        }
+    }
+    return status;
+}
+
 
 lucid_status vmm_unmap(uint32_t virt)
 {

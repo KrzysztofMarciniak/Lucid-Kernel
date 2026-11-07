@@ -67,6 +67,11 @@ trailing newline.
 | `/system/syscalls/terminal_size` | read | Returns `columns rows` |
 | `/system/syscalls/reap` | read | Reaps exited children and returns the count |
 
+`/system/processes/list` is a read-only process table with PID, parent PID,
+state, and image columns. Write an image path or unique image basename to
+`/system/processes/kill` to terminate that process. The current process and
+PID 1 cannot be killed; missing or ambiguous names fail.
+
 For example, `(write (file /system/syscalls/write) (text "hello\n"))` writes
 to the terminal, while `(print (read (file /system/syscalls/get_ticks)))`
 returns the current tick count. Write-only endpoints reject reads; read-only
