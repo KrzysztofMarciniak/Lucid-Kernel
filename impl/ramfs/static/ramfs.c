@@ -507,8 +507,15 @@ lucid_status ramfs_init(void)
         { "/system", 0, 0, 1 },
         { "/system/info", 0, 0, 1 },
         { "/system/config", 0, 0, 1 },
+        { "/system/config/defaults", 0, 0, 1 },
         { "/system/config/clearsh", 0, 0, 1 },
         { "/system/config/pioneer", 0, 0, 1 },
+        { "/system/config/defaults/shell", "/system/bin/clearsh\n",
+          sizeof("/system/bin/clearsh\n") - 1, 0 },
+        { "/system/config/defaults/window_manager",
+          "/system/bin/brain\n", sizeof("/system/bin/brain\n") - 1, 0 },
+        { "/system/config/defaults/terminal",
+          "/system/bin/eye\n", sizeof("/system/bin/eye\n") - 1, 0 },
         { "/system/config/clearsh/zoom", "1\n", 2, 0 },
         { "/system/config/resolution", "1024x768x32\n", 12, 0 },
         { "/system/config/brain.conf", "bar=top\n", 8, 0 },
@@ -576,7 +583,7 @@ lucid_status ramfs_init(void)
           "  Mod+Shift+H/L   shrink / grow the master window\n"
           "  Mod+0..9        switch desktop\n"
           "  Mod+Shift+0..9  move focused window to desktop\n"
-          "The shell starts on desktop 1. Desktop 0 shows boot output when empty.\n"
+          "Window 1 shows logs on desktop 1; startup opens a terminal on desktop 2.\n"
           "Set the status bar with /system/config/brain.conf, for example:\n"
           "  (write (file /system/config/brain.conf) (text \"bar=left\\n\"))\n"
           "Valid positions: top, bottom, left, right. Changes apply when written.\n",
@@ -590,7 +597,7 @@ lucid_status ramfs_init(void)
                  "  Mod+Shift+H/L   shrink / grow the master window\n"
                  "  Mod+0..9        switch desktop\n"
                  "  Mod+Shift+0..9  move focused window to desktop\n"
-                 "The shell starts on desktop 1. Desktop 0 shows boot output when empty.\n"
+                 "Window 1 shows logs on desktop 1; startup opens a terminal on desktop 2.\n"
                  "Set the status bar with /system/config/brain.conf, for example:\n"
                  "  (write (file /system/config/brain.conf) (text \"bar=left\\n\"))\n"
                  "Valid positions: top, bottom, left, right. Changes apply when written.\n") - 1,

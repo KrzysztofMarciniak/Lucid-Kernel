@@ -447,6 +447,12 @@ static uint32_t screen_rows(void)
     return rows;
 }
 
+static uint32_t terminal_surface_slot(void)
+{
+    uint32_t slot = usermode_process_current_slot();
+    return slot == 0 ? 1 : slot;
+}
+
 static void update_surface_dimensions(void)
 {
     uint32_t columns = screen_columns();
@@ -488,8 +494,8 @@ static void initialize_surfaces(void)
         terminal_surfaces[slot].columns = columns;
         terminal_surfaces[slot].rows = rows;
     }
-    terminal_windows[0] =
-        (terminal_window){ 0, 0, columns, rows, 0, 1 };
+    terminal_windows[1] =
+        (terminal_window){ 0, 0, columns, rows, 1, 1 };
 }
 
 static void draw_screen_cell(uint32_t row,
@@ -621,8 +627,9 @@ static void draw_status_bar(void)
 
     char text[160];
     uint32_t length = 0;
-    uint32_t window_count = 0;
-    for (uint32_t slot = 1; slot < USERMODE_PROCESS_SLOTS; slot++) {
+    uint32_t window_count =
+        usermode_process_current_desktop() == 1 ? 1 : 0;
+    for (uint32_t slot = 2; slot < USERMODE_PROCESS_SLOTS; slot++) {
         if (usermode_process_window_visible(slot)) window_count++;
     }
     append_status_text(text, sizeof(text), &length, "Brain | desk ");
@@ -664,16 +671,14 @@ static void draw_screen_cell(uint32_t row,
     if (row >= screen_rows() || column >= screen_columns()) return;
     if (framebuffer) {
         uint32_t foreground = highlighted
-            ? framebuffer_background
+            ? 0xFF00FF00u
             : framebuffer_foreground;
-        uint32_t background = highlighted
-            ? framebuffer_foreground
-            : framebuffer_background;
         framebuffer_draw_glyph_colors(
-            row, column, (uint8_t)character, foreground, background
+            row, column, (uint8_t)character, foreground,
+            framebuffer_background
         );
     } else {
-        uint8_t attribute = highlighted ? 0x70 : VGA_ATTR;
+        uint8_t attribute = highlighted ? 0x0A : VGA_ATTR;
         vga_buf[row * VGA_WIDTH + column] =
             ((uint16_t)attribute << 8) | (uint8_t)character;
     }
@@ -708,38 +713,48 @@ static void draw_surface_window(uint32_t slot)
     if (window->title) {
         for (uint32_t x = 0; x < window->width; x++) {
             draw_screen_cell(window->y, window->x + x, ' ',
+                             slot == 1 ||
                              usermode_process_window_focused(slot));
         }
-        static const char title[] = "[Eye ";
         uint32_t offset = 0;
-        while (title[offset] && offset < window->width) {
-            draw_screen_cell(window->y, window->x + offset, title[offset],
-                             usermode_process_window_focused(slot));
-            offset++;
-        }
-        uint32_t pid = usermode_process_window_pid(slot);
-        char digits[10];
-        uint32_t count = 0;
-        do {
-            digits[count++] = (char)('0' + pid % 10);
-            pid /= 10;
-        } while (pid && count < sizeof(digits));
-        while (count && offset < window->width) {
-            draw_screen_cell(window->y, window->x + offset,
-                             digits[--count],
-                             usermode_process_window_focused(slot));
-            offset++;
-        }
-        if (offset < window->width) {
-            draw_screen_cell(window->y, window->x + offset++, ']',
-                             usermode_process_window_focused(slot));
-        }
-        if (usermode_process_window_focused(slot) &&
-            offset + 8 < window->width) {
-            static const char focused[] = " focused";
-            for (uint32_t i = 0; focused[i]; i++) {
-                draw_screen_cell(window->y, window->x + offset + i,
-                                 focused[i], 1);
+        if (slot == 1) {
+            static const char title[] = "[Logs]";
+            while (title[offset] && offset < window->width) {
+                draw_screen_cell(window->y, window->x + offset,
+                                 title[offset], 1);
+                offset++;
+            }
+        } else {
+            static const char title[] = "[Eye ";
+            while (title[offset] && offset < window->width) {
+                draw_screen_cell(window->y, window->x + offset, title[offset],
+                                 usermode_process_window_focused(slot));
+                offset++;
+            }
+            uint32_t pid = usermode_process_window_pid(slot);
+            char digits[10];
+            uint32_t count = 0;
+            do {
+                digits[count++] = (char)('0' + pid % 10);
+                pid /= 10;
+            } while (pid && count < sizeof(digits));
+            while (count && offset < window->width) {
+                draw_screen_cell(window->y, window->x + offset,
+                                 digits[--count],
+                                 usermode_process_window_focused(slot));
+                offset++;
+            }
+            if (offset < window->width) {
+                draw_screen_cell(window->y, window->x + offset++, ']',
+                                 usermode_process_window_focused(slot));
+            }
+            if (usermode_process_window_focused(slot) &&
+                offset + 8 < window->width) {
+                static const char focused[] = " focused";
+                for (uint32_t i = 0; focused[i]; i++) {
+                    draw_screen_cell(window->y, window->x + offset + i,
+                                     focused[i], 1);
+                }
             }
         }
     }
@@ -781,7 +796,10 @@ static void refresh_window_layout(void)
 
     uint32_t visible[USERMODE_PROCESS_SLOTS];
     uint32_t count = 0;
-    for (uint32_t slot = 1; slot < USERMODE_PROCESS_SLOTS; slot++) {
+    if (usermode_process_current_desktop() == 1) {
+        visible[count++] = 1;
+    }
+    for (uint32_t slot = 2; slot < USERMODE_PROCESS_SLOTS; slot++) {
         if (usermode_process_window_visible(slot)) {
             visible[count++] = slot;
         }
@@ -790,15 +808,14 @@ static void refresh_window_layout(void)
     for (uint32_t slot = 0; slot < USERMODE_PROCESS_SLOTS; slot++) {
         terminal_windows[slot].visible = 0;
     }
-    if (count == 0 && usermode_process_current_desktop() == 0) {
-        terminal_windows[0] = (terminal_window){
-            origin_x, origin_y, workspace_width, workspace_height, 0, 1
-        };
+    if (count == 0) {
+        return;
     } else if (count == 1) {
         uint32_t slot = visible[0];
         terminal_windows[slot] =
             (terminal_window){
-                origin_x, origin_y, workspace_width, workspace_height, 0, 1
+                origin_x, origin_y, workspace_width, workspace_height,
+                slot == 1, 1
             };
     } else if (workspace_width < 24) {
         uint32_t y = origin_y;
@@ -862,8 +879,8 @@ static void refresh_window_layout(void)
 void terminal_refresh(void)
 {
     initialize_surfaces();
-    refresh_window_layout();
     update_surface_dimensions();
+    refresh_window_layout();
     if (framebuffer) {
         framebuffer_clear();
     } else {
@@ -880,7 +897,7 @@ void terminal_refresh(void)
 uint32_t terminal_get_size(void)
 {
     initialize_surfaces();
-    uint32_t slot = usermode_process_current_slot();
+    uint32_t slot = terminal_surface_slot();
     terminal_surface *surface = &terminal_surfaces[slot];
     return (surface->columns << 16) | surface->rows;
 }
@@ -1057,7 +1074,7 @@ static void surface_put_ascii(uint32_t slot, char character)
 
 void terminal_clear(void)
 {
-    uint32_t slot = usermode_process_current_slot();
+    uint32_t slot = terminal_surface_slot();
     initialize_surfaces();
     surface_clear(&terminal_surfaces[slot]);
     redraw_surface(slot);
@@ -1077,19 +1094,19 @@ void terminal_cursor_show(void)
 {
     if (terminal_cursor_visible) return;
     terminal_cursor_visible = 1;
-    draw_cursor(usermode_process_current_slot(), 1);
+    draw_cursor(terminal_surface_slot(), 1);
 }
 
 void terminal_cursor_hide(void)
 {
     if (!terminal_cursor_visible) return;
-    draw_cursor(usermode_process_current_slot(), 0);
+    draw_cursor(terminal_surface_slot(), 0);
     terminal_cursor_visible = 0;
 }
 
 void terminal_putc(char c)
 {
-    uint32_t slot = usermode_process_current_slot();
+    uint32_t slot = terminal_surface_slot();
     initialize_surfaces();
     terminal_surface *surface = &terminal_surfaces[slot];
     uint8_t byte = (uint8_t)c;

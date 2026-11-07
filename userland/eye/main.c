@@ -12,9 +12,19 @@ static void write_text(const char *text)
 __attribute__((section(".entry")))
 void eye_user_entry(void)
 {
-    static const char shell[] = "/system/bin/clearsh";
-    lucid_user_syscall(SYS_EXEC, (uint32_t)shell, sizeof(shell) - 1, 0, 0);
-    write_text("Eye: could not start Clearsh\n");
+    static const char config_path[] = "/system/config/defaults/shell";
+    char shell[SYS_PATH_MAX];
+    uint32_t shell_length;
+    if (!lucid_read_config_path(config_path, shell, &shell_length)) {
+        write_text("Eye: invalid /system/config/defaults/shell\n");
+        lucid_user_syscall(SYS_EXIT, 127, 0, 0, 0);
+        for (;;) { }
+    }
+
+    lucid_user_syscall(
+        SYS_EXEC, (uint32_t)shell, shell_length, 0, 0
+    );
+    write_text("Eye: could not start the configured shell\n");
     lucid_user_syscall(SYS_EXIT, 127, 0, 0, 0);
     for (;;) { }
 }

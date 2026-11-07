@@ -49,6 +49,39 @@
 #define SYS_COMPLETION_NAMES_MAX 1024u
 #define SYS_PROMPT_MAX 264u
 
+#ifdef LUCID_USER
+static inline int lucid_read_config_path(const char *config_path,
+                                         char path[SYS_PATH_MAX],
+                                         uint32_t *path_length)
+{
+    uint32_t config_path_length = 0;
+    while (config_path[config_path_length]) config_path_length++;
+
+    char config[SYS_PATH_MAX + 2];
+    uint32_t length = lucid_user_syscall(
+        SYS_FS_READ,
+        (uint32_t)config_path,
+        config_path_length,
+        (uint32_t)config,
+        sizeof(config)
+    );
+    if (length == SYS_UNKNOWN_TEST || length >= sizeof(config)) return 0;
+
+    while (length &&
+           (config[length - 1] == '\n' || config[length - 1] == '\r')) {
+        length--;
+    }
+    if (!length || length >= SYS_PATH_MAX || config[0] != '/') return 0;
+    for (uint32_t i = 0; i < length; i++) {
+        if (config[i] <= ' ' || config[i] == 0x7F) return 0;
+        path[i] = config[i];
+    }
+    path[length] = '\0';
+    *path_length = length;
+    return 1;
+}
+#endif
+
 /* Optional SYS_READLINE metadata. Pass its address in EDX and its size in
  * ESI; pass zero in both registers to retain plain line editing. */
 typedef struct {

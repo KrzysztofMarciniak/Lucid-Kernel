@@ -39,10 +39,37 @@ static void run_child(const char *path)
     }
 }
 
+static int run_default_window_manager(void)
+{
+    static const char config_path[] =
+        "/system/config/defaults/window_manager";
+    char manager[SYS_PATH_MAX];
+    uint32_t manager_length;
+    if (!lucid_read_config_path(config_path, manager, &manager_length)) {
+        write_text(
+            "Pioneer: invalid /system/config/defaults/window_manager\n"
+        );
+        return 0;
+    }
+    run_child(manager);
+    return 1;
+}
+
 #ifdef LUCID_TEST_MODE
 static void test_syscall_modules(void)
 {
     static const char zoom_path[] = "/system/config/clearsh/zoom";
+    static const char defaults_dir[] = "/system/config/defaults";
+    static const char *default_paths[] = {
+        "/system/config/defaults/shell",
+        "/system/config/defaults/window_manager",
+        "/system/config/defaults/terminal"
+    };
+    static const char *default_programs[] = {
+        "/system/bin/clearsh\n",
+        "/system/bin/brain\n",
+        "/system/bin/eye\n"
+    };
     static const char system_path[] = "/system";
     static const char syscall_dir[] = "/system/syscalls";
     static const char process_dir[] = "/system/processes";
@@ -50,6 +77,7 @@ static void test_syscall_modules(void)
     static const char process_kill[] = "/system/processes/kill";
     static const char self_image[] = "/system/bin/pioneer";
     char buffer[128];
+    char configured_path[SYS_PATH_MAX];
     uint32_t result = lucid_user_syscall(
         SYS_FS_READ,
         (uint32_t)zoom_path,
@@ -59,6 +87,34 @@ static void test_syscall_modules(void)
     );
     if (result != 2 || buffer[0] != '1' || buffer[1] != '\n') {
         for (;;) { }
+    }
+
+    result = lucid_user_syscall(
+        SYS_FS_STAT,
+        (uint32_t)defaults_dir,
+        sizeof(defaults_dir) - 1,
+        0,
+        0
+    );
+    if (result != 1) {
+        for (;;) { }
+    }
+    for (uint32_t i = 0;
+         i < sizeof(default_paths) / sizeof(default_paths[0]); i++) {
+        uint32_t configured_length;
+        if (!lucid_read_config_path(
+                default_paths[i], configured_path, &configured_length)) {
+            for (;;) { }
+        }
+        uint32_t expected_length = text_length(default_programs[i]) - 1;
+        if (configured_length != expected_length) {
+            for (;;) { }
+        }
+        for (uint32_t j = 0; j < expected_length; j++) {
+            if (configured_path[j] != default_programs[i][j]) {
+                for (;;) { }
+            }
+        }
     }
 
     result = lucid_user_syscall(
@@ -188,9 +244,10 @@ void pioneer_user_entry(void)
     test_syscall_modules();
 #endif
     for (;;) {
-        static const char brain[] = "/system/bin/brain";
         static const char eye[] = "/system/bin/eye";
-        run_child(brain);
+        if (!run_default_window_manager()) {
+            exit_process(1);
+        }
         run_child(eye);
     }
 }

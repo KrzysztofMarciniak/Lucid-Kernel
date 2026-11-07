@@ -1,5 +1,6 @@
 #include "panic.h"
 #include "recipes/gdt.h"
+#include "recipes/ramfs.h"
 #include "recipes/syscall.h"
 #include "recipes/terminal.h"
 #include "recipes/usermode.h"
@@ -54,6 +55,7 @@ static uint32_t focused_slot;
 static uint32_t window_manager_slot;
 static uint32_t current_desktop = 1;
 static uint32_t master_ratio = 60;
+static int manager_process_slot_reserved;
 
 static process *process_at_slot(uint32_t slot);
 
@@ -72,17 +74,41 @@ static process *current(void)
     return current_process;
 }
 
+static int is_configured_program(const char *path, const char *config_path)
+{
+    char configured_path[SYS_PATH_MAX + 1];
+    size_t length = 0;
+    if (ramfs_read(config_path, configured_path,
+                   sizeof(configured_path), &length) != 0 ||
+        length >= sizeof(configured_path)) {
+        return 0;
+    }
+    while (length &&
+           (configured_path[length - 1] == '\n' ||
+            configured_path[length - 1] == '\r')) {
+        length--;
+    }
+    if (length == 0 || length >= SYS_PATH_MAX) return 0;
+    configured_path[length] = '\0';
+
+    size_t i = 0;
+    while (i < length && path[i] && path[i] == configured_path[i]) i++;
+    return i == length && path[i] == '\0';
+}
+
 uint32_t usermode_process_fork(usermode_frame *frame)
 {
     process *parent = current();
     process *child = 0;
-    for (uint32_t i = 0; i < PROCESS_LIMIT; i++) {
+    uint32_t first_slot = manager_process_slot_reserved ? 1 : 0;
+    for (uint32_t i = first_slot; i < PROCESS_LIMIT; i++) {
         if (!process_table[i].in_use) {
             child = &process_table[i];
             break;
         }
     }
     if (!child) return SYS_UNKNOWN_TEST;
+    if (child == &process_table[0]) manager_process_slot_reserved = 1;
 
     vmm_space *child_space = 0;
     lucid_status st = vmm_space_clone_current(&child_space);
@@ -192,7 +218,7 @@ static void close_window(process *entry)
     }
     entry->state = PROCESS_EXITED;
     entry->exit_status = 0;
-    terminal_set_status("Killing Eye");
+    terminal_set_status("Killing terminal");
     enqueue_key(window_manager_slot, SYS_WM_REAP);
     if (focused_slot == (uint32_t)(entry == &root_process ? 0 :
             (entry - process_table + 1))) {
@@ -207,7 +233,7 @@ void usermode_process_route_key(int key)
         int command = key - TERMINAL_KEY_MOD_BASE;
         if (window_manager_slot == 0) return;
         if (command == '\n') {
-            terminal_set_status("Starting Eye");
+            terminal_set_status("Starting terminal");
             enqueue_key(window_manager_slot, SYS_WM_OPEN);
         } else if (command == 'q') {
             process *focused = process_at_slot(focused_slot);
@@ -434,13 +460,23 @@ int usermode_process_exec(const char *path, usermode_frame *frame)
     }
     static const char eye_path[] = "/system/bin/eye";
     static const char brain_path[] = "/system/bin/brain";
-    int is_eye = 1;
-    int is_brain = 1;
-    for (uint32_t i = 0; i < sizeof(eye_path); i++) {
-        if (path[i] != eye_path[i]) is_eye = 0;
+    static const char terminal_config[] =
+        "/system/config/defaults/terminal";
+    static const char manager_config[] =
+        "/system/config/defaults/window_manager";
+    int is_terminal = is_configured_program(path, terminal_config);
+    int is_manager = is_configured_program(path, manager_config);
+    if (!is_terminal) {
+        is_terminal = 1;
+        for (uint32_t i = 0; i < sizeof(eye_path); i++) {
+            if (path[i] != eye_path[i]) is_terminal = 0;
+        }
     }
-    for (uint32_t i = 0; i < sizeof(brain_path); i++) {
-        if (path[i] != brain_path[i]) is_brain = 0;
+    if (!is_manager) {
+        is_manager = 1;
+        for (uint32_t i = 0; i < sizeof(brain_path); i++) {
+            if (path[i] != brain_path[i]) is_manager = 0;
+        }
     }
 
     lucid_status st = vmm_space_clear_user(process->space);
@@ -475,16 +511,21 @@ int usermode_process_exec(const char *path, usermode_frame *frame)
     frame->eflags = 0x202;
     frame->user_esp = USERMODE_STACK_TOP;
     process->name = image->path;
-    terminal_process_reset(usermode_process_current_slot());
-    if (is_brain) {
+    uint32_t slot = usermode_process_current_slot();
+    if (!(is_manager && slot == 1)) {
+        terminal_process_reset(slot);
+    }
+    if (is_manager) {
         process->is_manager = 1;
-        window_manager_slot = usermode_process_current_slot();
+        window_manager_slot = slot;
+        current_desktop = 2;
+        focused_slot = 0;
         terminal_config_reload();
     }
-    if (is_eye) {
+    if (is_terminal) {
         process->is_window = 1;
         process->desktop = current_desktop;
-        focused_slot = usermode_process_current_slot();
+        focused_slot = slot;
         terminal_refresh();
     }
     return 1;

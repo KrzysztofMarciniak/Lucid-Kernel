@@ -40,6 +40,10 @@ The initial tree includes:
 │   │   ├── pioneer
 │   │   └── clearsh
 │   └── config/
+│       ├── defaults/
+│       │   ├── shell
+│       │   ├── window_manager
+│       │   └── terminal
 │       └── pioneer/
 │           ├── boot
 │           ├── welcome.clearsh
@@ -132,6 +136,10 @@ Configuration files describe the desired state of the machine.
 
 ```text
 /system/config/
+├── defaults/
+│   ├── shell
+│   ├── window_manager
+│   └── terminal
 ├── boot
 ├── packages
 ├── services
@@ -152,6 +160,15 @@ git
 The package list is declarative:
 
 > A package listed here should exist on the system.
+
+The default application paths are stored in `/system/config/defaults/`:
+`shell` names `/system/bin/clearsh`, `window_manager` names
+`/system/bin/brain`, and `terminal` names `/system/bin/eye`.
+Eye reads `shell`, and Brain reads `terminal` when launching applications.
+Pioneer reads `window_manager` at boot.
+Brain keeps the combined root and manager output in log window 1, visible on
+desktop 1 only. Startup switches to desktop 2 and opens a terminal there;
+configured terminal windows start at 2.
 
 ---
 
