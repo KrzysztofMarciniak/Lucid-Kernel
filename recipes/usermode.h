@@ -69,8 +69,11 @@ int usermode_process_window_visible(uint32_t slot);
 int usermode_process_window_focused(uint32_t slot);
 uint32_t usermode_process_window_pid(uint32_t slot);
 uint32_t usermode_process_current_desktop(void);
+uint32_t usermode_process_desktop_count(void);
 uint32_t usermode_process_window_desktop(uint32_t slot);
 uint32_t usermode_process_master_ratio(void);
+uint32_t usermode_process_log_desktop(void);
+void usermode_process_config_reload(void);
 int usermode_process_info(char *buffer, size_t capacity, size_t *length);
 int usermode_process_kill(const char *name);
 

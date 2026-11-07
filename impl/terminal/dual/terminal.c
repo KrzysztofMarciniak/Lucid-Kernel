@@ -10,7 +10,6 @@
 #define COM1 0x3F8
 #define VGA_WIDTH 80
 #define VGA_HEIGHT 25
-#define VGA_ATTR 0x07
 #define CURIE_WIDTH 6
 #define CURIE_HEIGHT 12
 #define TERMINAL_ZOOM_MAX 4
@@ -87,8 +86,9 @@ static uint32_t framebuffer_length;
 static uint32_t framebuffer_pitch;
 static uint32_t framebuffer_width;
 static uint32_t framebuffer_height;
-static uint32_t framebuffer_foreground;
-static uint32_t framebuffer_background;
+static uint32_t framebuffer_foreground = 0xFFFFFFFFu;
+static uint32_t framebuffer_background = 0xFF000000u;
+static uint32_t framebuffer_accent = 0xFF00FF00u;
 static uint32_t vbe_control_info;
 static const char *framebuffer_status =
     "GRUB did not provide a framebuffer; using VGA output";
@@ -503,10 +503,111 @@ static void draw_screen_cell(uint32_t row,
                              char character,
                              int highlighted);
 
+static int terminal_config_value(const char *config,
+                                 size_t length,
+                                 const char *name,
+                                 const char **value,
+                                 size_t *value_length)
+{
+    size_t name_length = 0;
+    while (name[name_length]) name_length++;
+
+    size_t offset = 0;
+    while (offset < length) {
+        size_t end = offset;
+        while (end < length && config[end] != '\n' &&
+               config[end] != '\r') {
+            end++;
+        }
+        size_t start = offset;
+        while (start < end &&
+               (config[start] == ' ' || config[start] == '\t')) {
+            start++;
+        }
+        if (start < end && config[start] != '#') {
+            size_t equals = start;
+            while (equals < end && config[equals] != '=') equals++;
+            size_t key_end = equals;
+            while (key_end > start &&
+                   (config[key_end - 1] == ' ' ||
+                    config[key_end - 1] == '\t')) {
+                key_end--;
+            }
+            if (equals < end && key_end - start == name_length) {
+                size_t i = 0;
+                while (i < name_length &&
+                       config[start + i] == name[i]) {
+                    i++;
+                }
+                if (i == name_length) {
+                    start = equals + 1;
+                    while (start < end &&
+                           (config[start] == ' ' ||
+                            config[start] == '\t')) {
+                        start++;
+                    }
+                    while (end > start &&
+                           (config[end - 1] == ' ' ||
+                            config[end - 1] == '\t')) {
+                        end--;
+                    }
+                    *value = config + start;
+                    *value_length = end - start;
+                    return 1;
+                }
+            }
+        }
+        offset = end + 1;
+    }
+    return 0;
+}
+
+static int config_value_equals(const char *value,
+                               size_t value_length,
+                               const char *expected)
+{
+    size_t expected_length = 0;
+    while (expected[expected_length]) expected_length++;
+    if (value_length != expected_length) return 0;
+    for (size_t i = 0; i < value_length; i++) {
+        if (value[i] != expected[i]) return 0;
+    }
+    return 1;
+}
+
+static int parse_terminal_color(const char *value,
+                               size_t length,
+                               uint32_t *color)
+{
+    if (length != 6) return 0;
+    uint32_t result = 0;
+    for (size_t i = 0; i < length; i++) {
+        char digit = value[i];
+        uint32_t nibble;
+        if (digit >= '0' && digit <= '9') {
+            nibble = (uint32_t)(digit - '0');
+        } else if (digit >= 'a' && digit <= 'f') {
+            nibble = (uint32_t)(digit - 'a') + 10u;
+        } else if (digit >= 'A' && digit <= 'F') {
+            nibble = (uint32_t)(digit - 'A') + 10u;
+        } else {
+            return 0;
+        }
+        result = (result << 4) | nibble;
+    }
+    *color = 0xFF000000u | result;
+    return 1;
+}
+
 static void load_terminal_config(void)
 {
     if (terminal_config_loaded) return;
     terminal_config_loaded = 1;
+    terminal_bar = TERMINAL_BAR_TOP;
+    framebuffer_foreground = 0xFFFFFFFFu;
+    framebuffer_background = 0xFF000000u;
+    framebuffer_accent = 0xFF00FF00u;
+    terminal_zoom = 1;
 
     static const char zoom_path[] = "/system/config/clearsh/zoom";
     char zoom_config[8];
@@ -529,47 +630,70 @@ static void load_terminal_config(void)
 
     apply_resolution_config();
 
-    static const char path[] = "/system/config/brain.conf";
-    char config[128];
-    size_t length = 0;
-    if (ramfs_read(path, config, sizeof(config), &length) != 0) return;
+    static const char theme_path[] = "/system/config/brain/theme";
+    static const char legacy_path[] = "/system/config/brain.conf";
+    char theme[512];
+    char legacy[128];
+    size_t theme_length = 0;
+    size_t legacy_length = 0;
+    if (ramfs_read(theme_path, theme, sizeof(theme), &theme_length) != 0 ||
+        theme_length >= sizeof(theme)) {
+        terminal_set_status("Brain theme config unreadable or too large");
+        return;
+    }
+    if (ramfs_read(legacy_path, legacy, sizeof(legacy), &legacy_length) != 0 ||
+        legacy_length >= sizeof(legacy)) {
+        legacy_length = 0;
+    }
 
-    size_t line = 0;
-    while (line < length) {
-        size_t end = line;
-        while (end < length && config[end] != '\n' &&
-               config[end] != '\r') {
-            end++;
+    const char *value;
+    size_t value_length;
+    int has_bar = terminal_config_value(
+        theme, theme_length, "bar", &value, &value_length
+    );
+    if (!has_bar) {
+        has_bar = terminal_config_value(
+            legacy, legacy_length, "bar", &value, &value_length
+        );
+    }
+    if (has_bar) {
+        if (config_value_equals(value, value_length, "top")) {
+            terminal_bar = TERMINAL_BAR_TOP;
+        } else if (config_value_equals(value, value_length, "bottom")) {
+            terminal_bar = TERMINAL_BAR_BOTTOM;
+        } else if (config_value_equals(value, value_length, "left")) {
+            terminal_bar = TERMINAL_BAR_LEFT;
+        } else if (config_value_equals(value, value_length, "right")) {
+            terminal_bar = TERMINAL_BAR_RIGHT;
+        } else {
+            terminal_set_status("Invalid bar position");
         }
-        static const char key[] = "bar=";
-        if (end - line >= sizeof(key) - 1 &&
-            config[line] == key[0] && config[line + 1] == key[1] &&
-            config[line + 2] == key[2] && config[line + 3] == key[3]) {
-            size_t value_length = end - line - (sizeof(key) - 1);
-            const char *value = config + line + sizeof(key) - 1;
-            if (value_length == 3 && value[0] == 't' &&
-                value[1] == 'o' && value[2] == 'p') {
-                terminal_bar = TERMINAL_BAR_TOP;
-            } else if (value_length == 6 && value[0] == 'b' &&
-                       value[1] == 'o' && value[2] == 't' &&
-                       value[3] == 't' && value[4] == 'o' &&
-                       value[5] == 'm') {
-                terminal_bar = TERMINAL_BAR_BOTTOM;
-            } else if (value_length == 4 && value[0] == 'l' &&
-                       value[1] == 'e' && value[2] == 'f' &&
-                       value[3] == 't') {
-                terminal_bar = TERMINAL_BAR_LEFT;
-            } else if (value_length == 5 && value[0] == 'r' &&
-                       value[1] == 'i' && value[2] == 'g' &&
-                       value[3] == 'h' && value[4] == 't') {
-                terminal_bar = TERMINAL_BAR_RIGHT;
-            } else {
-                static const char invalid[] = "Invalid bar position";
-                terminal_set_status(invalid);
-            }
-            return;
+    }
+
+    uint32_t color;
+    if (terminal_config_value(theme, theme_length, "foreground",
+                              &value, &value_length)) {
+        if (parse_terminal_color(value, value_length, &color)) {
+            framebuffer_foreground = color;
+        } else {
+            terminal_set_status("Invalid Brain foreground color");
         }
-        line = end + 1;
+    }
+    if (terminal_config_value(theme, theme_length, "background",
+                              &value, &value_length)) {
+        if (parse_terminal_color(value, value_length, &color)) {
+            framebuffer_background = color;
+        } else {
+            terminal_set_status("Invalid Brain background color");
+        }
+    }
+    if (terminal_config_value(theme, theme_length, "accent",
+                              &value, &value_length)) {
+        if (parse_terminal_color(value, value_length, &color)) {
+            framebuffer_accent = color;
+        } else {
+            terminal_set_status("Invalid Brain accent color");
+        }
     }
 }
 
@@ -597,6 +721,46 @@ static void append_status_number(char *buffer,
     while (count && *length < capacity) {
         buffer[(*length)++] = digits[--count];
     }
+}
+
+static uint8_t vga_color_index(uint32_t color)
+{
+    static const uint32_t palette[16] = {
+        0x000000u, 0x0000AAu, 0x00AA00u, 0x00AAAAu,
+        0xAA0000u, 0xAA00AAu, 0xAA5500u, 0xAAAAAAu,
+        0x555555u, 0x5555FFu, 0x55FF55u, 0x55FFFFu,
+        0xFF5555u, 0xFF55FFu, 0xFFFF55u, 0xFFFFFFu
+    };
+    uint32_t red = (color >> 16) & 0xFFu;
+    uint32_t green = (color >> 8) & 0xFFu;
+    uint32_t blue = color & 0xFFu;
+    uint32_t best_distance = 0xFFFFFFFFu;
+    uint8_t best_index = 0;
+    for (uint8_t i = 0; i < 16; i++) {
+        uint32_t palette_red = (palette[i] >> 16) & 0xFFu;
+        uint32_t palette_green = (palette[i] >> 8) & 0xFFu;
+        uint32_t palette_blue = palette[i] & 0xFFu;
+        int32_t red_delta = (int32_t)red - (int32_t)palette_red;
+        int32_t green_delta = (int32_t)green - (int32_t)palette_green;
+        int32_t blue_delta = (int32_t)blue - (int32_t)palette_blue;
+        uint32_t distance = (uint32_t)(
+            red_delta * red_delta +
+            green_delta * green_delta +
+            blue_delta * blue_delta
+        );
+        if (distance < best_distance) {
+            best_distance = distance;
+            best_index = i;
+        }
+    }
+    return best_index;
+}
+
+static uint8_t vga_attribute(uint32_t foreground, uint32_t background)
+{
+    uint8_t foreground_index = vga_color_index(foreground);
+    uint8_t background_index = vga_color_index(background) & 0x07u;
+    return (uint8_t)((background_index << 4) | foreground_index);
 }
 
 static void draw_status_bar(void)
@@ -628,13 +792,17 @@ static void draw_status_bar(void)
     char text[160];
     uint32_t length = 0;
     uint32_t window_count =
-        usermode_process_current_desktop() == 1 ? 1 : 0;
+        usermode_process_current_desktop() ==
+            usermode_process_log_desktop() ? 1 : 0;
     for (uint32_t slot = 2; slot < USERMODE_PROCESS_SLOTS; slot++) {
         if (usermode_process_window_visible(slot)) window_count++;
     }
     append_status_text(text, sizeof(text), &length, "Brain | desk ");
     append_status_number(text, sizeof(text), &length,
                          usermode_process_current_desktop());
+    append_status_text(text, sizeof(text), &length, "/");
+    append_status_number(text, sizeof(text), &length,
+                         usermode_process_desktop_count());
     append_status_text(text, sizeof(text), &length, " | windows ");
     append_status_number(text, sizeof(text), &length, window_count);
     append_status_text(text, sizeof(text), &length, " | focus ");
@@ -671,14 +839,17 @@ static void draw_screen_cell(uint32_t row,
     if (row >= screen_rows() || column >= screen_columns()) return;
     if (framebuffer) {
         uint32_t foreground = highlighted
-            ? 0xFF00FF00u
+            ? framebuffer_accent
             : framebuffer_foreground;
         framebuffer_draw_glyph_colors(
             row, column, (uint8_t)character, foreground,
             framebuffer_background
         );
     } else {
-        uint8_t attribute = highlighted ? 0x0A : VGA_ATTR;
+        uint8_t attribute = vga_attribute(
+            highlighted ? framebuffer_accent : framebuffer_foreground,
+            framebuffer_background
+        );
         vga_buf[row * VGA_WIDTH + column] =
             ((uint16_t)attribute << 8) | (uint8_t)character;
     }
@@ -796,7 +967,8 @@ static void refresh_window_layout(void)
 
     uint32_t visible[USERMODE_PROCESS_SLOTS];
     uint32_t count = 0;
-    if (usermode_process_current_desktop() == 1) {
+    if (usermode_process_current_desktop() ==
+        usermode_process_log_desktop()) {
         visible[count++] = 1;
     }
     for (uint32_t slot = 2; slot < USERMODE_PROCESS_SLOTS; slot++) {
@@ -884,8 +1056,10 @@ void terminal_refresh(void)
     if (framebuffer) {
         framebuffer_clear();
     } else {
+        uint8_t attribute = vga_attribute(framebuffer_foreground,
+                                          framebuffer_background);
         for (uint32_t i = 0; i < VGA_WIDTH * VGA_HEIGHT; i++) {
-            vga_buf[i] = ((uint16_t)VGA_ATTR << 8) | ' ';
+            vga_buf[i] = ((uint16_t)attribute << 8) | ' ';
         }
     }
     for (uint32_t slot = 0; slot < USERMODE_PROCESS_SLOTS; slot++) {

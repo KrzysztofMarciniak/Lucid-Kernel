@@ -162,7 +162,119 @@ static void run_pioneer_scripts(void)
     }
 }
 
-static void read_line(char *buffer, size_t capacity)
+static int append_prompt_text(char *buffer,
+                              size_t capacity,
+                              size_t *length,
+                              const char *text,
+                              size_t text_length)
+{
+    if (text_length >= capacity - *length) return 0;
+    for (size_t i = 0; i < text_length; i++) {
+        buffer[(*length)++] = text[i];
+    }
+    return 1;
+}
+
+static size_t build_prompt(char *buffer, size_t capacity)
+{
+    static const char path[] = "/system/config/clearsh/prompt";
+    static const char default_template[] = "\xCE\xBB %p> ";
+    static int config_error_reported;
+    char source[128];
+    uint32_t length = clearsh_syscall(
+        SYS_FS_READ,
+        (uint32_t)path,
+        sizeof(path) - 1,
+        (uint32_t)source,
+        sizeof(source)
+    );
+    int valid = length != SYS_UNKNOWN_TEST && length < sizeof(source);
+    if (valid) {
+        while (length &&
+               (source[length - 1] == '\n' || source[length - 1] == '\r')) {
+            length--;
+        }
+    }
+    if (!valid) {
+        length = sizeof(default_template) - 1;
+        for (size_t i = 0; i < length; i++) source[i] = default_template[i];
+    }
+
+    size_t output_length = 0;
+    for (size_t i = 0; i < length && valid; i++) {
+        char character = source[i];
+        if ((unsigned char)character < 0x20 || character == 0x7F) {
+            valid = 0;
+            break;
+        }
+        if (character != '%') {
+            if (!append_prompt_text(buffer, capacity, &output_length,
+                                    &character, 1)) {
+                valid = 0;
+                break;
+            }
+            continue;
+        }
+        if (++i >= length) {
+            valid = 0;
+            break;
+        }
+        if (source[i] == 'p') {
+            size_t directory_length = string_length(current_directory);
+            if (!append_prompt_text(buffer, capacity, &output_length,
+                                    current_directory,
+                                    directory_length)) {
+                valid = 0;
+                break;
+            }
+        } else if (source[i] == '%') {
+            if (!append_prompt_text(buffer, capacity, &output_length,
+                                    "%", 1)) {
+                valid = 0;
+                break;
+            }
+        } else {
+            valid = 0;
+        }
+    }
+
+    if (!valid) {
+        if (!config_error_reported) {
+            terminal_write(
+                "Clearsh: invalid prompt config; using the default\n"
+            );
+            config_error_reported = 1;
+        }
+        source[0] = '\0';
+        output_length = 0;
+        for (size_t i = 0; i < sizeof(default_template) - 1; i++) {
+            char character = default_template[i];
+            if (character == '%' && default_template[i + 1] == 'p') {
+                size_t directory_length = string_length(current_directory);
+                if (!append_prompt_text(buffer, capacity, &output_length,
+                                        current_directory,
+                                        directory_length)) {
+                    buffer[0] = '\0';
+                    return 0;
+                }
+                i++;
+            } else if (!append_prompt_text(buffer, capacity, &output_length,
+                                           &character, 1)) {
+                buffer[0] = '\0';
+                return 0;
+            }
+        }
+    } else {
+        config_error_reported = 0;
+    }
+    buffer[output_length] = '\0';
+    return output_length;
+}
+
+static void read_line(char *buffer,
+                      size_t capacity,
+                      const char *prompt,
+                      size_t prompt_length)
 {
     sys_readline_completion completion;
     uint8_t *completion_bytes = (uint8_t *)&completion;
@@ -172,13 +284,8 @@ static void read_line(char *buffer, size_t capacity)
 
     size_t function_names_length = 0;
     size_t directory_length = string_length(current_directory);
-    static const char prompt_prefix[] = "\xCE\xBB ";
-    static const char prompt_suffix[] = "> ";
-    size_t prompt_prefix_length = sizeof(prompt_prefix) - 1;
-    size_t prompt_suffix_length = sizeof(prompt_suffix) - 1;
     if (directory_length >= sizeof(completion.current_directory) ||
-        prompt_prefix_length + directory_length + prompt_suffix_length >=
-            sizeof(completion.prompt) ||
+        prompt_length >= sizeof(completion.prompt) ||
         !clearsh_function_candidates(
             completion.function_names,
             sizeof(completion.function_names),
@@ -192,15 +299,8 @@ static void read_line(char *buffer, size_t capacity)
     for (size_t i = 0; i < directory_length; i++) {
         completion.current_directory[i] = current_directory[i];
     }
-    for (size_t i = 0; i < prompt_prefix_length; i++) {
-        completion.prompt[i] = prompt_prefix[i];
-    }
-    for (size_t i = 0; i < directory_length; i++) {
-        completion.prompt[prompt_prefix_length + i] = current_directory[i];
-    }
-    for (size_t i = 0; i < prompt_suffix_length; i++) {
-        completion.prompt[prompt_prefix_length + directory_length + i] =
-            prompt_suffix[i];
+    for (size_t i = 0; i < prompt_length; i++) {
+        completion.prompt[i] = prompt[i];
     }
     completion.function_names_length = (uint32_t)function_names_length;
 
@@ -229,10 +329,10 @@ static void shell_loop(void)
     char line[LINE_MAX];
 
     for (;;) {
-        terminal_write("\xCE\xBB ");
-        terminal_write(current_directory);
-        terminal_write("> ");
-        read_line(line, sizeof(line));
+        char prompt[SYS_PROMPT_MAX];
+        size_t prompt_length = build_prompt(prompt, sizeof(prompt));
+        terminal_write(prompt);
+        read_line(line, sizeof(line), prompt, prompt_length);
         arena_used = 0;
         value result = evaluate_line(line);
         if (result.type == VALUE_ERROR) {

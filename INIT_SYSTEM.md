@@ -23,8 +23,13 @@ partition.
 
 Changes to the window-manager default apply on the next boot. Terminal changes
 apply the next time Brain opens a terminal; shell changes apply the next time
-Eye starts. Brain shows the log view in window 1 on desktop 1 only, then
-switches to desktop 2 and opens the startup terminal there. Terminal windows
-start at 2. This is a single-child process model, not general multitasking. The
-recipe list in `config.mk` remains the place for kernel-level initialization;
+Eye starts. Brain reads `/system/config/brain/layout`, `keys`, and `theme` for
+desktop/layout policy, keybindings, and display appearance. The defaults show
+the log view in window 1 on desktop 1, then switch to desktop 2 and open the
+startup terminal there. Clearsh reads `/system/config/clearsh/prompt` before
+each prompt; `%p` expands to the current directory and `%%` to a literal `%`.
+Pioneer boot scripts remain in `/system/config/pioneer/boot`.
+
+This is a single-child process model, not general multitasking. The recipe list
+in `config.mk` remains the place for kernel-level initialization;
 `/system/config/pioneer/boot` configures only userspace startup scripts.

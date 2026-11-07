@@ -10,7 +10,8 @@
 #define PROCESS_LIMIT (USERMODE_PROCESS_SLOTS - 1)
 #define PROCESS_KERNEL_STACK_SIZE 4096
 #define PROCESS_INPUT_QUEUE_SIZE 64
-#define DESKTOP_COUNT 10
+#define DESKTOP_LIMIT 10
+#define BRAIN_CONFIG_MAX 512
 
 typedef enum {
     PROCESS_UNUSED,
@@ -55,6 +56,21 @@ static uint32_t focused_slot;
 static uint32_t window_manager_slot;
 static uint32_t current_desktop = 1;
 static uint32_t master_ratio = 60;
+static uint32_t master_min_ratio = 30;
+static uint32_t master_max_ratio = 80;
+static uint32_t master_step = 5;
+static uint32_t desktop_count = DESKTOP_LIMIT;
+static uint32_t startup_desktop = 2;
+static uint32_t log_desktop = 1;
+static uint32_t key_open = TERMINAL_KEY_MOD_BASE + '\n';
+static uint32_t key_close = TERMINAL_KEY_MOD_BASE + 'q';
+static uint32_t key_focus_next = TERMINAL_KEY_MOD_BASE + 'j';
+static uint32_t key_focus_previous = TERMINAL_KEY_MOD_BASE + 'k';
+static uint32_t key_exit = TERMINAL_KEY_MOD_SHIFT_BASE + 'q';
+static uint32_t key_master_shrink = TERMINAL_KEY_MOD_SHIFT_BASE + 'h';
+static uint32_t key_master_grow = TERMINAL_KEY_MOD_SHIFT_BASE + 'l';
+static uint32_t key_switch_desktop = TERMINAL_KEY_MOD_BASE;
+static uint32_t key_move_desktop = TERMINAL_KEY_MOD_SHIFT_BASE;
 static int manager_process_slot_reserved;
 
 static process *process_at_slot(uint32_t slot);
@@ -94,6 +110,333 @@ static int is_configured_program(const char *path, const char *config_path)
     size_t i = 0;
     while (i < length && path[i] && path[i] == configured_path[i]) i++;
     return i == length && path[i] == '\0';
+}
+
+static int brain_config_value(const char *config,
+                              size_t length,
+                              const char *name,
+                              const char **value,
+                              size_t *value_length)
+{
+    size_t name_length = 0;
+    while (name[name_length]) name_length++;
+
+    size_t offset = 0;
+    while (offset < length) {
+        size_t end = offset;
+        while (end < length && config[end] != '\n' &&
+               config[end] != '\r') {
+            end++;
+        }
+        size_t start = offset;
+        while (start < end &&
+               (config[start] == ' ' || config[start] == '\t')) {
+            start++;
+        }
+        if (start < end && config[start] != '#') {
+            size_t equals = start;
+            while (equals < end && config[equals] != '=') equals++;
+            size_t key_end = equals;
+            while (key_end > start &&
+                   (config[key_end - 1] == ' ' ||
+                    config[key_end - 1] == '\t')) {
+                key_end--;
+            }
+            if (equals < end && key_end - start == name_length) {
+                size_t i = 0;
+                while (i < name_length &&
+                       config[start + i] == name[i]) {
+                    i++;
+                }
+                if (i == name_length) {
+                    start = equals + 1;
+                    while (start < end &&
+                           (config[start] == ' ' ||
+                            config[start] == '\t')) {
+                        start++;
+                    }
+                    while (end > start &&
+                           (config[end - 1] == ' ' ||
+                            config[end - 1] == '\t')) {
+                        end--;
+                    }
+                    *value = config + start;
+                    *value_length = end - start;
+                    return 1;
+                }
+            }
+        }
+        offset = end + 1;
+    }
+    return 0;
+}
+
+static int parse_config_number(const char *value,
+                               size_t length,
+                               uint32_t *number)
+{
+    if (length == 0) return 0;
+    uint32_t result = 0;
+    for (size_t i = 0; i < length; i++) {
+        if (value[i] < '0' || value[i] > '9') return 0;
+        uint32_t digit = (uint32_t)(value[i] - '0');
+        if (result > (0xFFFFFFFFu - digit) / 10u) return 0;
+        result = result * 10u + digit;
+    }
+    *number = result;
+    return 1;
+}
+
+static int parse_key_binding(const char *value,
+                             size_t length,
+                             uint32_t *binding)
+{
+    static const char alt_prefix[] = "alt+";
+    static const char shift_prefix[] = "alt+shift+";
+    if (length == 9) {
+        static const char digits[] = "alt+digit";
+        size_t i = 0;
+        while (i < length && value[i] == digits[i]) i++;
+        if (i == length) {
+            *binding = TERMINAL_KEY_MOD_BASE;
+            return 1;
+        }
+    }
+    if (length == 15) {
+        static const char digits[] = "alt+shift+digit";
+        size_t i = 0;
+        while (i < length && value[i] == digits[i]) i++;
+        if (i == length) {
+            *binding = TERMINAL_KEY_MOD_SHIFT_BASE;
+            return 1;
+        }
+    }
+
+    size_t prefix_length;
+    uint32_t key_base;
+    if (length > sizeof(shift_prefix) - 1) {
+        prefix_length = sizeof(shift_prefix) - 1;
+        key_base = TERMINAL_KEY_MOD_SHIFT_BASE;
+        size_t i = 0;
+        while (i < prefix_length && value[i] == shift_prefix[i]) i++;
+        if (i != prefix_length) return 0;
+    } else {
+        prefix_length = sizeof(alt_prefix) - 1;
+        key_base = TERMINAL_KEY_MOD_BASE;
+        if (length <= prefix_length) return 0;
+        size_t i = 0;
+        while (i < prefix_length && value[i] == alt_prefix[i]) i++;
+        if (i != prefix_length) return 0;
+    }
+
+    size_t key_length = length - prefix_length;
+    if (key_length == 5 && value[prefix_length] == 'e' &&
+        value[prefix_length + 1] == 'n' &&
+        value[prefix_length + 2] == 't' &&
+        value[prefix_length + 3] == 'e' &&
+        value[prefix_length + 4] == 'r') {
+        *binding = key_base + '\n';
+        return 1;
+    }
+    if (key_length != 1) return 0;
+    char key = value[prefix_length];
+    if (key >= 'A' && key <= 'Z') key += 'a' - 'A';
+    if (key < '!' || key > '~' || key == '+') return 0;
+    *binding = key_base + (uint32_t)key;
+    return 1;
+}
+
+static void load_key_binding(const char *config,
+                             size_t length,
+                             const char *name,
+                             uint32_t *binding)
+{
+    const char *value;
+    size_t value_length;
+    uint32_t parsed;
+    if (!brain_config_value(config, length, name,
+                            &value, &value_length)) {
+        return;
+    }
+    if (parse_key_binding(value, value_length, &parsed) &&
+        parsed != TERMINAL_KEY_MOD_BASE &&
+        parsed != TERMINAL_KEY_MOD_SHIFT_BASE) {
+        *binding = parsed;
+    } else {
+        terminal_set_status("Invalid Brain key binding");
+    }
+}
+
+static void load_brain_process_config(void)
+{
+    desktop_count = DESKTOP_LIMIT;
+    startup_desktop = 2;
+    log_desktop = 1;
+    master_ratio = 60;
+    master_min_ratio = 30;
+    master_max_ratio = 80;
+    master_step = 5;
+    key_open = TERMINAL_KEY_MOD_BASE + '\n';
+    key_close = TERMINAL_KEY_MOD_BASE + 'q';
+    key_focus_next = TERMINAL_KEY_MOD_BASE + 'j';
+    key_focus_previous = TERMINAL_KEY_MOD_BASE + 'k';
+    key_exit = TERMINAL_KEY_MOD_SHIFT_BASE + 'q';
+    key_master_shrink = TERMINAL_KEY_MOD_SHIFT_BASE + 'h';
+    key_master_grow = TERMINAL_KEY_MOD_SHIFT_BASE + 'l';
+    key_switch_desktop = TERMINAL_KEY_MOD_BASE;
+    key_move_desktop = TERMINAL_KEY_MOD_SHIFT_BASE;
+
+    static const char layout_path[] = "/system/config/brain/layout";
+    static const char keys_path[] = "/system/config/brain/keys";
+    char layout[BRAIN_CONFIG_MAX];
+    char keys[BRAIN_CONFIG_MAX];
+    size_t layout_length = 0;
+    size_t keys_length = 0;
+    if (ramfs_read(layout_path, layout, sizeof(layout),
+                   &layout_length) != 0 ||
+        layout_length >= sizeof(layout) ||
+        ramfs_read(keys_path, keys, sizeof(keys), &keys_length) != 0 ||
+        keys_length >= sizeof(keys)) {
+        terminal_set_status("Brain config unreadable or too large");
+        return;
+    }
+
+    const char *value;
+    size_t value_length;
+    uint32_t number;
+    if (brain_config_value(layout, layout_length, "desktops",
+                           &value, &value_length)) {
+        if (parse_config_number(value, value_length, &number) &&
+            number >= 1 && number <= DESKTOP_LIMIT) {
+            desktop_count = number;
+        } else {
+            terminal_set_status("Invalid Brain desktop count");
+        }
+    }
+    if (brain_config_value(layout, layout_length, "startup_desktop",
+                           &value, &value_length)) {
+        if (parse_config_number(value, value_length, &number) &&
+            number < desktop_count) {
+            startup_desktop = number;
+        } else {
+            terminal_set_status("Invalid Brain startup desktop");
+        }
+    }
+    if (brain_config_value(layout, layout_length, "log_desktop",
+                           &value, &value_length)) {
+        if (parse_config_number(value, value_length, &number) &&
+            number < desktop_count) {
+            log_desktop = number;
+        } else {
+            terminal_set_status("Invalid Brain log desktop");
+        }
+    }
+    if (startup_desktop >= desktop_count) {
+        startup_desktop = desktop_count > 2 ? 2 : 0;
+    }
+    if (log_desktop >= desktop_count) {
+        log_desktop = desktop_count > 1 ? 1 : 0;
+    }
+    if (brain_config_value(layout, layout_length, "master_ratio",
+                           &value, &value_length)) {
+        if (parse_config_number(value, value_length, &number) &&
+            number >= 1 && number <= 99) {
+            master_ratio = number;
+        } else {
+            terminal_set_status("Invalid Brain master ratio");
+        }
+    }
+    if (brain_config_value(layout, layout_length, "master_min_ratio",
+                           &value, &value_length)) {
+        if (parse_config_number(value, value_length, &number) &&
+            number >= 1 && number <= 99) {
+            master_min_ratio = number;
+        } else {
+            terminal_set_status("Invalid Brain minimum master ratio");
+        }
+    }
+    if (brain_config_value(layout, layout_length, "master_max_ratio",
+                           &value, &value_length)) {
+        if (parse_config_number(value, value_length, &number) &&
+            number >= 1 && number <= 99) {
+            master_max_ratio = number;
+        } else {
+            terminal_set_status("Invalid Brain maximum master ratio");
+        }
+    }
+    if (brain_config_value(layout, layout_length, "master_step",
+                           &value, &value_length)) {
+        if (parse_config_number(value, value_length, &number) &&
+            number >= 1 && number <= 99) {
+            master_step = number;
+        } else {
+            terminal_set_status("Invalid Brain master step");
+        }
+    }
+    if (master_min_ratio >= master_max_ratio) {
+        master_min_ratio = 30;
+        master_max_ratio = 80;
+        terminal_set_status("Invalid Brain master ratio limits");
+    }
+    if (master_ratio < master_min_ratio ||
+        master_ratio > master_max_ratio) {
+        master_ratio = master_ratio < master_min_ratio
+            ? master_min_ratio
+            : master_max_ratio;
+        terminal_set_status("Brain master ratio clamped to limits");
+    }
+
+    load_key_binding(keys, keys_length, "key_open", &key_open);
+    load_key_binding(keys, keys_length, "key_close", &key_close);
+    load_key_binding(keys, keys_length, "key_focus_next", &key_focus_next);
+    load_key_binding(keys, keys_length,
+                     "key_focus_previous", &key_focus_previous);
+    load_key_binding(keys, keys_length, "key_exit", &key_exit);
+    load_key_binding(keys, keys_length,
+                     "key_master_shrink", &key_master_shrink);
+    load_key_binding(keys, keys_length,
+                     "key_master_grow", &key_master_grow);
+
+    if (brain_config_value(keys, keys_length, "key_switch_desktop",
+                           &value, &value_length)) {
+        uint32_t binding;
+        if (parse_key_binding(value, value_length, &binding) &&
+            (binding == TERMINAL_KEY_MOD_BASE ||
+             binding == TERMINAL_KEY_MOD_SHIFT_BASE)) {
+            key_switch_desktop = binding;
+        } else {
+            terminal_set_status("Invalid Brain desktop key binding");
+        }
+    }
+    if (brain_config_value(keys, keys_length, "key_move_desktop",
+                           &value, &value_length)) {
+        uint32_t binding;
+        if (parse_key_binding(value, value_length, &binding) &&
+            (binding == TERMINAL_KEY_MOD_BASE ||
+             binding == TERMINAL_KEY_MOD_SHIFT_BASE)) {
+            key_move_desktop = binding;
+        } else {
+            terminal_set_status("Invalid Brain move key binding");
+        }
+    }
+    if (key_switch_desktop == key_move_desktop) {
+        key_switch_desktop = TERMINAL_KEY_MOD_BASE;
+        key_move_desktop = TERMINAL_KEY_MOD_SHIFT_BASE;
+        terminal_set_status("Brain desktop bindings must differ");
+    }
+}
+
+void usermode_process_config_reload(void)
+{
+    load_brain_process_config();
+    if (current_desktop >= desktop_count) current_desktop = 0;
+    for (uint32_t slot = 1; slot < USERMODE_PROCESS_SLOTS; slot++) {
+        process *entry = process_at_slot(slot);
+        if (entry && entry->in_use && entry->is_window &&
+            entry->desktop >= desktop_count) {
+            entry->desktop = desktop_count - 1;
+        }
+    }
 }
 
 uint32_t usermode_process_fork(usermode_frame *frame)
@@ -226,28 +569,78 @@ static void close_window(process *entry)
     }
 }
 
+static int handle_brain_binding(uint32_t key)
+{
+    if (key == key_open) {
+        terminal_set_status("Starting terminal");
+        enqueue_key(window_manager_slot, SYS_WM_OPEN);
+    } else if (key == key_close) {
+        close_window(process_at_slot(focused_slot));
+    } else if (key == key_focus_next) {
+        focused_slot = next_window_slot(focused_slot, 1);
+        terminal_set_status("Focus changed");
+    } else if (key == key_focus_previous) {
+        focused_slot = next_window_slot(focused_slot, -1);
+        terminal_set_status("Focus changed");
+    } else if (key == key_exit) {
+        terminal_set_status("Brain exiting");
+        for (uint32_t slot = 1; slot < USERMODE_PROCESS_SLOTS; slot++) {
+            close_window(process_at_slot(slot));
+        }
+        terminal_set_status("Brain exiting");
+        enqueue_key(window_manager_slot, SYS_WM_EXIT);
+    } else if (key == key_master_shrink &&
+               master_ratio > master_min_ratio) {
+        master_ratio = master_ratio - master_step < master_min_ratio
+            ? master_min_ratio
+            : master_ratio - master_step;
+        terminal_set_status("Master resized");
+    } else if (key == key_master_grow &&
+               master_ratio < master_max_ratio) {
+        master_ratio = master_ratio + master_step > master_max_ratio
+            ? master_max_ratio
+            : master_ratio + master_step;
+        terminal_set_status("Master resized");
+    } else {
+        return 0;
+    }
+    return 1;
+}
+
+static void switch_desktop(uint32_t desktop)
+{
+    current_desktop = desktop;
+    focused_slot = next_window_slot(USERMODE_PROCESS_SLOTS - 1, 1);
+    terminal_set_status("Desktop changed");
+}
+
+static void move_focused_window(uint32_t desktop)
+{
+    process *focused = process_at_slot(focused_slot);
+    if (!focused || !focused->in_use || !focused->is_window) return;
+    focused->desktop = desktop;
+    if (focused->desktop != current_desktop) {
+        focused_slot = next_window_slot(focused_slot, 1);
+    }
+    terminal_set_status("Window moved");
+}
+
 void usermode_process_route_key(int key)
 {
     if (key >= TERMINAL_KEY_MOD_BASE &&
         key < TERMINAL_KEY_MOD_SHIFT_BASE) {
         int command = key - TERMINAL_KEY_MOD_BASE;
         if (window_manager_slot == 0) return;
-        if (command == '\n') {
-            terminal_set_status("Starting terminal");
-            enqueue_key(window_manager_slot, SYS_WM_OPEN);
-        } else if (command == 'q') {
-            process *focused = process_at_slot(focused_slot);
-            close_window(focused);
-        } else if (command == 'j') {
-            focused_slot = next_window_slot(focused_slot, 1);
-            terminal_set_status("Focus changed");
-        } else if (command == 'k') {
-            focused_slot = next_window_slot(focused_slot, -1);
-            terminal_set_status("Focus changed");
-        } else if (command >= '0' && command <= '9') {
-            current_desktop = (uint32_t)(command - '0');
-            focused_slot = next_window_slot(USERMODE_PROCESS_SLOTS - 1, 1);
-            terminal_set_status("Desktop changed");
+        if (command >= '0' && command <= '9' &&
+            (uint32_t)(command - '0') < desktop_count &&
+            key_switch_desktop == TERMINAL_KEY_MOD_BASE) {
+            switch_desktop((uint32_t)(command - '0'));
+        } else if (command >= '0' && command <= '9' &&
+                   (uint32_t)(command - '0') < desktop_count &&
+                   key_move_desktop == TERMINAL_KEY_MOD_BASE) {
+            move_focused_window((uint32_t)(command - '0'));
+        } else {
+            (void)handle_brain_binding((uint32_t)key);
         }
         terminal_refresh();
         return;
@@ -259,28 +652,18 @@ void usermode_process_route_key(int key)
         if (command >= 'A' && command <= 'Z') {
             command += 'a' - 'A';
         }
-        if (command == 'q') {
-            terminal_set_status("Brain exiting");
-            for (uint32_t slot = 1; slot < USERMODE_PROCESS_SLOTS; slot++) {
-                close_window(process_at_slot(slot));
-            }
-            terminal_set_status("Brain exiting");
-            enqueue_key(window_manager_slot, SYS_WM_EXIT);
-        } else if (command == 'h' && master_ratio > 30) {
-            master_ratio -= 5;
-            terminal_set_status("Master resized");
-        } else if (command == 'l' && master_ratio < 80) {
-            master_ratio += 5;
-            terminal_set_status("Master resized");
-        } else if (command >= '0' && command <= '9') {
-            process *focused = process_at_slot(focused_slot);
-            if (focused && focused->in_use && focused->is_window) {
-                focused->desktop = (uint32_t)(command - '0');
-                if (focused->desktop != current_desktop) {
-                    focused_slot = next_window_slot(focused_slot, 1);
-                }
-                terminal_set_status("Window moved");
-            }
+        uint32_t normalized_key =
+            TERMINAL_KEY_MOD_SHIFT_BASE + (uint32_t)command;
+        if (command >= '0' && command <= '9' &&
+            (uint32_t)(command - '0') < desktop_count &&
+            key_move_desktop == TERMINAL_KEY_MOD_SHIFT_BASE) {
+            move_focused_window((uint32_t)(command - '0'));
+        } else if (command >= '0' && command <= '9' &&
+                   (uint32_t)(command - '0') < desktop_count &&
+                   key_switch_desktop == TERMINAL_KEY_MOD_SHIFT_BASE) {
+            switch_desktop((uint32_t)(command - '0'));
+        } else {
+            (void)handle_brain_binding(normalized_key);
         }
         terminal_refresh();
         return;
@@ -332,6 +715,11 @@ uint32_t usermode_process_current_desktop(void)
     return current_desktop;
 }
 
+uint32_t usermode_process_desktop_count(void)
+{
+    return desktop_count;
+}
+
 uint32_t usermode_process_window_desktop(uint32_t slot)
 {
     process *entry = process_at_slot(slot);
@@ -343,6 +731,11 @@ uint32_t usermode_process_window_desktop(uint32_t slot)
 uint32_t usermode_process_master_ratio(void)
 {
     return master_ratio;
+}
+
+uint32_t usermode_process_log_desktop(void)
+{
+    return log_desktop;
 }
 
 int usermode_process_wait(uint32_t pid, usermode_frame *frame)
@@ -518,9 +911,11 @@ int usermode_process_exec(const char *path, usermode_frame *frame)
     if (is_manager) {
         process->is_manager = 1;
         window_manager_slot = slot;
-        current_desktop = 2;
         focused_slot = 0;
+        usermode_process_config_reload();
         terminal_config_reload();
+        current_desktop = startup_desktop;
+        terminal_refresh();
     }
     if (is_terminal) {
         process->is_window = 1;

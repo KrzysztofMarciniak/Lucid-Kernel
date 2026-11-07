@@ -510,6 +510,7 @@ lucid_status ramfs_init(void)
         { "/system/config/defaults", 0, 0, 1 },
         { "/system/config/clearsh", 0, 0, 1 },
         { "/system/config/pioneer", 0, 0, 1 },
+        { "/system/config/brain", 0, 0, 1 },
         { "/system/config/defaults/shell", "/system/bin/clearsh\n",
           sizeof("/system/bin/clearsh\n") - 1, 0 },
         { "/system/config/defaults/window_manager",
@@ -517,8 +518,51 @@ lucid_status ramfs_init(void)
         { "/system/config/defaults/terminal",
           "/system/bin/eye\n", sizeof("/system/bin/eye\n") - 1, 0 },
         { "/system/config/clearsh/zoom", "1\n", 2, 0 },
+        { "/system/config/clearsh/prompt",
+          "\xCE\xBB %p> \n", sizeof("\xCE\xBB %p> \n") - 1, 0 },
         { "/system/config/resolution", "1024x768x32\n", 12, 0 },
         { "/system/config/brain.conf", "bar=top\n", 8, 0 },
+        { "/system/config/brain/layout",
+          "desktops=10\n"
+          "startup_desktop=2\n"
+          "log_desktop=1\n"
+          "master_ratio=60\n"
+          "master_min_ratio=30\n"
+          "master_max_ratio=80\n"
+          "master_step=5\n",
+          sizeof("desktops=10\n"
+                 "startup_desktop=2\n"
+                 "log_desktop=1\n"
+                 "master_ratio=60\n"
+                 "master_min_ratio=30\n"
+                 "master_max_ratio=80\n"
+                 "master_step=5\n") - 1, 0 },
+        { "/system/config/brain/keys",
+          "key_open=alt+enter\n"
+          "key_close=alt+q\n"
+          "key_focus_next=alt+j\n"
+          "key_focus_previous=alt+k\n"
+          "key_exit=alt+shift+q\n"
+          "key_master_shrink=alt+shift+h\n"
+          "key_master_grow=alt+shift+l\n"
+          "key_switch_desktop=alt+digit\n"
+          "key_move_desktop=alt+shift+digit\n",
+          sizeof("key_open=alt+enter\n"
+                 "key_close=alt+q\n"
+                 "key_focus_next=alt+j\n"
+                 "key_focus_previous=alt+k\n"
+                 "key_exit=alt+shift+q\n"
+                 "key_master_shrink=alt+shift+h\n"
+                 "key_master_grow=alt+shift+l\n"
+                 "key_switch_desktop=alt+digit\n"
+                 "key_move_desktop=alt+shift+digit\n") - 1, 0 },
+        { "/system/config/brain/theme",
+          "background=000000\n"
+          "foreground=FFFFFF\n"
+          "accent=00FF00\n",
+          sizeof("background=000000\n"
+                 "foreground=FFFFFF\n"
+                 "accent=00FF00\n") - 1, 0 },
         { "/users", 0, 0, 1 },
         { "/users/root", 0, 0, 1 },
         { "/tmp", 0, 0, 1 },
@@ -575,32 +619,36 @@ lucid_status ramfs_init(void)
         { "/BRAIN.TXT",
           "Brain window manager\n"
           "====================\n"
-          "Brain manages Eye terminal windows. Mod is either Alt key.\n"
-          "  Mod+Enter       open an Eye terminal\n"
+          "Brain manages terminal windows. Mod is either Alt key.\n"
+          "  Mod+Enter       open a terminal\n"
           "  Mod+Q           close the focused window\n"
           "  Mod+Shift+Q     exit Brain\n"
           "  Mod+J / Mod+K   focus the left / right window\n"
           "  Mod+Shift+H/L   shrink / grow the master window\n"
           "  Mod+0..9        switch desktop\n"
           "  Mod+Shift+0..9  move focused window to desktop\n"
-          "Window 1 shows logs on desktop 1; startup opens a terminal on desktop 2.\n"
-          "Set the status bar with /system/config/brain.conf, for example:\n"
-          "  (write (file /system/config/brain.conf) (text \"bar=left\\n\"))\n"
-          "Valid positions: top, bottom, left, right. Changes apply when written.\n",
+          "Window 1 shows logs on the configured log desktop.\n"
+          "Edit /system/config/brain/layout for desktop count, startup/log\n"
+          "desktops, master ratio/limits/step. Edit /system/config/brain/keys\n"
+          "to change bindings. Edit /system/config/brain/theme for bar position\n"
+          "and RGB colors (six hex digits without #). Changes apply on write.\n"
+          "The old /system/config/brain.conf bar setting is a fallback.\n",
           sizeof("Brain window manager\n"
                  "====================\n"
-                 "Brain manages Eye terminal windows. Mod is either Alt key.\n"
-                 "  Mod+Enter       open an Eye terminal\n"
+                 "Brain manages terminal windows. Mod is either Alt key.\n"
+                 "  Mod+Enter       open a terminal\n"
                  "  Mod+Q           close the focused window\n"
                  "  Mod+Shift+Q     exit Brain\n"
                  "  Mod+J / Mod+K   focus the left / right window\n"
                  "  Mod+Shift+H/L   shrink / grow the master window\n"
                  "  Mod+0..9        switch desktop\n"
                  "  Mod+Shift+0..9  move focused window to desktop\n"
-                 "Window 1 shows logs on desktop 1; startup opens a terminal on desktop 2.\n"
-                 "Set the status bar with /system/config/brain.conf, for example:\n"
-                 "  (write (file /system/config/brain.conf) (text \"bar=left\\n\"))\n"
-                 "Valid positions: top, bottom, left, right. Changes apply when written.\n") - 1,
+                 "Window 1 shows logs on the configured log desktop.\n"
+                 "Edit /system/config/brain/layout for desktop count, startup/log\n"
+                 "desktops, master ratio/limits/step. Edit /system/config/brain/keys\n"
+                 "to change bindings. Edit /system/config/brain/theme for bar position\n"
+                 "and RGB colors (six hex digits without #). Changes apply on write.\n"
+                 "The old /system/config/brain.conf bar setting is a fallback.\n") - 1,
           0 },
         { "/SYSTEM.TXT",
           "System guide\n"
@@ -610,6 +658,8 @@ lucid_status ramfs_init(void)
           "  storage, processes, syscalls\n"
           "Common kernel interfaces are files under /system/syscalls:\n"
           "  write, readkey, clear, shutdown, get_ticks, terminal_size, reap\n"
+          "Runtime policy is configured with files under /system/config.\n"
+          "See /BRAIN.TXT for desktop, key, and theme settings.\n"
           "Example: (print (read (file /system/syscalls/get_ticks)))\n"
           "The filesystem is RAM-backed. A Lucid disk image saves snapshots;\n"
           "without one, changes are lost on power off. Shutdown uses ACPI S5\n"
@@ -623,6 +673,8 @@ lucid_status ramfs_init(void)
                  "  storage, processes, syscalls\n"
                  "Common kernel interfaces are files under /system/syscalls:\n"
                  "  write, readkey, clear, shutdown, get_ticks, terminal_size, reap\n"
+                 "Runtime policy is configured with files under /system/config.\n"
+                 "See /BRAIN.TXT for desktop, key, and theme settings.\n"
                  "Example: (print (read (file /system/syscalls/get_ticks)))\n"
                  "The filesystem is RAM-backed. A Lucid disk image saves snapshots;\n"
                  "without one, changes are lost on power off. Shutdown uses ACPI S5\n"
@@ -640,11 +692,11 @@ lucid_status ramfs_init(void)
         { "/system/info/features",
           "ring3 user mode\nint 0x80 syscalls\nCOM1 and VGA console\n"
           "PS/2 keyboard\nRAMFS and ATA persistent LucidFS\n"
-          "Brain tiled windows and ten desktops\n"
+          "Brain tiled windows and configurable desktops (1-10)\n"
           "Eye terminal with Clearsh\nClearsh boot scripts\n",
           sizeof("ring3 user mode\nint 0x80 syscalls\nCOM1 and VGA console\n"
                  "PS/2 keyboard\nRAMFS and ATA persistent LucidFS\n"
-                 "Brain tiled windows and ten desktops\n"
+                 "Brain tiled windows and configurable desktops (1-10)\n"
                  "Eye terminal with Clearsh\nClearsh boot scripts\n") - 1, 0 },
         { "/system/info/syscalls",
           "int 0x80: EAX=id, EBX/ECX/EDX/ESI=args; EAX=result\n"

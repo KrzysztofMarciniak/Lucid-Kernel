@@ -235,7 +235,10 @@ If the bootloader cannot provide a compatible RGB framebuffer, output falls
 back to VGA text mode. The font's SIL Open Font License is included in the
 boot image. On the framebuffer console, Clearsh zoom is set by writing `1`
 through `4` to `/system/config/clearsh/zoom` (default `1`); the display and
-terminal dimensions update immediately. VGA text mode keeps its native size.
+terminal dimensions update immediately. `/system/config/clearsh/prompt`
+controls the shell prompt; `%p` expands to the current directory and `%%`
+prints a literal percent sign. The default is `λ %p> `. Clearsh rereads the
+prompt file for each command. VGA text mode keeps its native size.
 
 To compare against the standard VGA text font, build and boot with
 `LUCID_TEXT_MODE=1 QEMU_DISPLAY=gtk ./build.sh run`. This skips GRUB's graphics
@@ -258,18 +261,30 @@ Poweroff uses ACPI S5 when firmware provides it, with QEMU/Bochs legacy-port
 fallback; shutting down a QEMU guest exits QEMU but leaves the host running.
 
 Brain uses a dwm-inspired master/stack layout. Mod is either Alt key:
-Mod+Enter starts an Eye, Mod+Q closes the focused Eye, and Mod+Shift+Q exits
-Brain to Clearsh. Mod+J/K changes focus, Mod+Shift+H/L adjusts the master
-pane, Mod+0..9 switches desktops, and Mod+Shift+0..9 moves the focused Eye.
-The status bar shows the active desktop, windows, focus, and lifecycle messages
-such as starting or killing an Eye. Its position is read from
-`/system/config/brain.conf`; set `bar=top`, `bar=bottom`, `bar=left`, or
-`bar=right`. The default seeded configuration is `bar=top`; Brain rereads the
-file each time it starts. For example, from Clearsh run
-`(write (file /system/config/brain.conf) (text "bar=left\n"))`, then exit
-Clearsh to let Pioneer restart Brain with the new position. The shell starts on
-desktop 1; desktop 0 remains reserved for boot output when it has no windows.
-Use Mod+0 to view the boot output and Mod+1 to return to the shell.
+Mod+Enter starts a terminal, Mod+Q closes the focused terminal, and
+Mod+Shift+Q exits Brain. Mod+J/K changes focus, Mod+Shift+H/L adjusts the
+master pane, Mod+0..9 switches desktops, and Mod+Shift+0..9 moves the focused
+terminal. Bindings are read from `/system/config/brain/keys`; values use
+`alt+<key>`, `alt+shift+<key>`, `alt+digit`, or `alt+shift+digit`.
+`/system/config/brain/layout` controls the desktop count, startup/log desktops,
+initial master ratio, resize limits, and resize step.
+`/system/config/brain/theme` controls the status-bar
+position (`top`, `bottom`, `left`, `right`) and `background`, `foreground`, and
+`accent` colors as six-digit RGB values without `#`. The layout keys are
+`desktops` (1-10), zero-based `startup_desktop` and `log_desktop` (each below
+the desktop count), `master_ratio`, `master_min_ratio`, `master_max_ratio`,
+and `master_step`. Ratios and resize steps are 1-99; the minimum must be below
+the maximum. Key names in `brain/keys` are `key_open`, `key_close`,
+`key_focus_next`,
+`key_focus_previous`, `key_exit`, `key_master_shrink`, `key_master_grow`,
+`key_switch_desktop`, and `key_move_desktop`. These files are reloaded when
+written. The compatibility file `/system/config/brain.conf` still supplies
+`bar=` if the theme file omits it.
+
+The default layout has ten desktops, shows logs in window 1 on desktop 1, and
+starts a terminal on desktop 2. Empty desktops default to black; the theme file
+can change that. For example, from Clearsh run
+`(write (file /system/config/brain/layout) (text "desktops=5\nstartup_desktop=2\nlog_desktop=1\nmaster_ratio=60\n"))`.
 
 `disk` produces `lucid-disk.img`: a GRUB/MBR boot disk with a FAT32 boot
 partition and a Lucid data partition for persistent shell files. It is safe to

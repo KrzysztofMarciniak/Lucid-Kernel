@@ -38,12 +38,23 @@ The initial tree includes:
 │   │   └── uptime
 │   ├── bin/ (virtual)
 │   │   ├── pioneer
+│   │   ├── brain
+│   │   ├── eye
 │   │   └── clearsh
 │   └── config/
 │       ├── defaults/
 │       │   ├── shell
 │       │   ├── window_manager
 │       │   └── terminal
+│       ├── brain/
+│       │   ├── keys
+│       │   ├── layout
+│       │   └── theme
+│       ├── clearsh/
+│       │   ├── prompt
+│       │   └── zoom
+│       ├── brain.conf (legacy bar setting)
+│       ├── resolution
 │       └── pioneer/
 │           ├── boot
 │           ├── welcome.clearsh
@@ -140,6 +151,15 @@ Configuration files describe the desired state of the machine.
 │   ├── shell
 │   ├── window_manager
 │   └── terminal
+├── brain/
+│   ├── layout
+│   ├── keys
+│   └── theme
+├── clearsh/
+│   ├── prompt
+│   └── zoom
+├── pioneer/
+│   └── boot
 ├── boot
 ├── packages
 ├── services
@@ -166,9 +186,16 @@ The default application paths are stored in `/system/config/defaults/`:
 `/system/bin/brain`, and `terminal` names `/system/bin/eye`.
 Eye reads `shell`, and Brain reads `terminal` when launching applications.
 Pioneer reads `window_manager` at boot.
-Brain keeps the combined root and manager output in log window 1, visible on
-desktop 1 only. Startup switches to desktop 2 and opens a terminal there;
-configured terminal windows start at 2.
+Clearsh's `prompt` file uses `%p` for the current directory and `%%` for a
+literal percent sign. Brain reads `layout` for desktop count, startup/log
+desktops, initial master ratio, resize limits, and resize step; `keys` for
+keyboard bindings; and `theme` for bar position and RGB colors. Writes to Brain
+config files reload them immediately. The older `/system/config/brain.conf`
+remains a compatibility source for the bar position when `theme` omits it.
+
+The default Brain layout keeps combined root and manager output in log window
+1, visible only on desktop 1. Startup switches to desktop 2 and opens the
+configured terminal there; terminal windows start at 2.
 
 ---
 

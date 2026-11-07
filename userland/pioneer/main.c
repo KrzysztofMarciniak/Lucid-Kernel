@@ -70,13 +70,41 @@ static void test_syscall_modules(void)
         "/system/bin/brain\n",
         "/system/bin/eye\n"
     };
+    static const char *policy_paths[] = {
+        "/system/config/clearsh/prompt",
+        "/system/config/brain/layout",
+        "/system/config/brain/keys",
+        "/system/config/brain/theme"
+    };
+    static const char *policy_defaults[] = {
+        "\xCE\xBB %p> \n",
+        "desktops=10\n"
+        "startup_desktop=2\n"
+        "log_desktop=1\n"
+        "master_ratio=60\n"
+        "master_min_ratio=30\n"
+        "master_max_ratio=80\n"
+        "master_step=5\n",
+        "key_open=alt+enter\n"
+        "key_close=alt+q\n"
+        "key_focus_next=alt+j\n"
+        "key_focus_previous=alt+k\n"
+        "key_exit=alt+shift+q\n"
+        "key_master_shrink=alt+shift+h\n"
+        "key_master_grow=alt+shift+l\n"
+        "key_switch_desktop=alt+digit\n"
+        "key_move_desktop=alt+shift+digit\n",
+        "background=000000\n"
+        "foreground=FFFFFF\n"
+        "accent=00FF00\n"
+    };
     static const char system_path[] = "/system";
     static const char syscall_dir[] = "/system/syscalls";
     static const char process_dir[] = "/system/processes";
     static const char process_list[] = "/system/processes/list";
     static const char process_kill[] = "/system/processes/kill";
     static const char self_image[] = "/system/bin/pioneer";
-    char buffer[128];
+    char buffer[256];
     char configured_path[SYS_PATH_MAX];
     uint32_t result = lucid_user_syscall(
         SYS_FS_READ,
@@ -112,6 +140,26 @@ static void test_syscall_modules(void)
         }
         for (uint32_t j = 0; j < expected_length; j++) {
             if (configured_path[j] != default_programs[i][j]) {
+                for (;;) { }
+            }
+        }
+    }
+    for (uint32_t i = 0;
+         i < sizeof(policy_paths) / sizeof(policy_paths[0]); i++) {
+        uint32_t path_length = text_length(policy_paths[i]);
+        uint32_t expected_length = text_length(policy_defaults[i]);
+        result = lucid_user_syscall(
+            SYS_FS_READ,
+            (uint32_t)policy_paths[i],
+            path_length,
+            (uint32_t)buffer,
+            sizeof(buffer)
+        );
+        if (result != expected_length) {
+            for (;;) { }
+        }
+        for (uint32_t j = 0; j < expected_length; j++) {
+            if (buffer[j] != policy_defaults[i][j]) {
                 for (;;) { }
             }
         }

@@ -1,6 +1,15 @@
 #include "impl/syscall/internal.h"
 #include "recipes/ramfs.h"
 #include "recipes/terminal.h"
+#include "recipes/usermode.h"
+
+static int config_path_starts_with(const char *path, const char *prefix)
+{
+    while (*prefix) {
+        if (*path++ != *prefix++) return 0;
+    }
+    return 1;
+}
 
 static uint32_t syscall_fs_write_handle(syscall_frame *frame)
 {
@@ -27,8 +36,13 @@ static uint32_t syscall_fs_write_handle(syscall_frame *frame)
         frame->eax = SYS_UNKNOWN_TEST;
         return 0;
     }
-    if (syscall_text_equals(path, "/system/config/clearsh/zoom") ||
+    if (syscall_text_equals(path, "/system/config/brain/layout") ||
+        syscall_text_equals(path, "/system/config/brain/keys")) {
+        usermode_process_config_reload();
+        terminal_config_reload();
+    } else if (config_path_starts_with(path, "/system/config/brain/") ||
         syscall_text_equals(path, "/system/config/brain.conf") ||
+        syscall_text_equals(path, "/system/config/clearsh/zoom") ||
         syscall_text_equals(path, "/system/config/resolution")) {
         terminal_config_reload();
     }
