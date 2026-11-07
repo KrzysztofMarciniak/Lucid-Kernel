@@ -101,6 +101,47 @@ For example, set `MEMORY_MB=512` to give QEMU 512 MiB and configure the
 allocator for the same range. After changing `config.mk`, run `./build.sh` to
 rebuild the kernel and ISO. The size-budget checks still apply.
 
+### Add a boot service
+
+Boot services are called recipes. The build generates the init table from
+`INIT_BOOT` and compiles the selected implementation automatically; do not edit
+`.build/init_table.c`.
+
+For example, to add a `logger` service:
+
+1. Declare its boot phases and public API in `recipes/logger.h`:
+
+   ```c
+   #ifndef LUCID_RECIPE_LOGGER_H
+   #define LUCID_RECIPE_LOGGER_H
+
+   #include "status.h"
+
+   /* REQUIRES: terminal */
+
+   lucid_status logger_pre(void);
+   lucid_status logger_init(void);
+   lucid_status logger_post(void);
+
+   void logger_write(const char *message);
+
+   #endif
+   ```
+
+   List every boot recipe it depends on in `REQUIRES`; dependencies must also
+   be in `INIT_BOOT` and appear before `logger`.
+2. Implement those three phase functions in a selected implementation
+   directory, such as `impl/logger/basic/logger.c`. Each returns a
+   `lucid_status` (`LUCID_OK` on success); a nonzero `ok` reports failure and
+   stops boot. Put the service functions, such as `logger_write`, in the same
+   implementation.
+3. In `config.mk`, set `LOGGER_IMPL=basic` and add `logger` to `INIT_BOOT`
+   after its dependencies. The selector must match the implementation
+   directory name.
+4. Build and smoke-test with `./build.sh` and `./build.sh test`. The build
+   checks dependency order, generates the table, and compiles source files
+   under the selected implementation directory.
+
 ### Use syscalls
 
 The easiest way to try a syscall in Clearsh is through its virtual syscall
