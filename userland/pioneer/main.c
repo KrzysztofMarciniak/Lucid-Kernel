@@ -11,13 +11,7 @@ static uint32_t text_length(const char *text)
 
 static void write_text(const char *text)
 {
-    lucid_user_syscall(
-        SYS_WRITE,
-        (uint32_t)text,
-        text_length(text),
-        0,
-        0
-    );
+    lucid_write(text, text_length(text));
 }
 
 static void write_spaces(uint32_t count)
@@ -27,7 +21,7 @@ static void write_spaces(uint32_t count)
     for (uint32_t i = 0; i < chunk; i++) spaces[i] = ' ';
     while (count) {
         chunk = count < sizeof(spaces) ? count : sizeof(spaces);
-        lucid_user_syscall(SYS_WRITE, (uint32_t)spaces, chunk, 0, 0);
+        lucid_write(spaces, chunk);
         count -= chunk;
     }
 }
@@ -124,9 +118,68 @@ static void run_child(const char *name, const char *path)
     write_text(" session ended\n");
 }
 
+#ifdef LUCID_TEST_MODE
+static void test_syscall_modules(void)
+{
+    static const char zoom_path[] = "/system/config/clearsh/zoom";
+    static const char system_path[] = "/system";
+    static const char syscall_dir[] = "/system/syscalls";
+    char buffer[128];
+    uint32_t result = lucid_user_syscall(
+        SYS_FS_READ,
+        (uint32_t)zoom_path,
+        sizeof(zoom_path) - 1,
+        (uint32_t)buffer,
+        sizeof(buffer)
+    );
+    if (result != 2 || buffer[0] != '1' || buffer[1] != '\n') {
+        for (;;) { }
+    }
+
+    result = lucid_user_syscall(
+        SYS_FS_READ,
+        (uint32_t)zoom_path,
+        sizeof(zoom_path) - 1,
+        0xFFFFFFFFu,
+        1
+    );
+    if (result != SYS_UNKNOWN_TEST) {
+        for (;;) { }
+    }
+
+    result = lucid_user_syscall(
+        SYS_FS_LIST,
+        (uint32_t)syscall_dir,
+        sizeof(syscall_dir) - 1,
+        (uint32_t)buffer,
+        sizeof(buffer)
+    );
+    if (result == 0 || result == SYS_UNKNOWN_TEST) {
+        for (;;) { }
+    }
+
+    result = lucid_user_syscall(
+        SYS_FS_STAT,
+        (uint32_t)system_path,
+        sizeof(system_path) - 1,
+        0,
+        0
+    );
+    if (result != 1) {
+        for (;;) { }
+    }
+}
+#endif
+
 __attribute__((section(".entry")))
 void pioneer_user_entry(void)
 {
+#ifdef LUCID_TEST_MODE
+    if (lucid_write((const char *)0xFFFFFFFFu, 1) != SYS_UNKNOWN_TEST) {
+        for (;;) { }
+    }
+    test_syscall_modules();
+#endif
     show_boot_splash();
     for (;;) {
         static const char brain[] = "/system/bin/brain";

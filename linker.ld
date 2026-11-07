@@ -15,6 +15,13 @@ SECTIONS
         *(.rodata)
     }
 
+    .syscall_handlers : ALIGN(4)
+    {
+        __start_syscall_handlers = .;
+        KEEP(*(.syscall_handlers))
+        __stop_syscall_handlers = .;
+    }
+
     .data BLOCK(4K) : ALIGN(4K)
     {
         *(.data)

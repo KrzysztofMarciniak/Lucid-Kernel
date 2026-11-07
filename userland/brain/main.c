@@ -6,7 +6,7 @@ static void write_text(const char *text)
 {
     uint32_t length = 0;
     while (text[length]) length++;
-    lucid_user_syscall(SYS_WRITE, (uint32_t)text, length, 0, 0);
+    lucid_write(text, length);
 }
 
 static uint32_t launch_eye(void)

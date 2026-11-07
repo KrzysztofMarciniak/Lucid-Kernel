@@ -13,12 +13,12 @@ void terminal_write(const char *text)
 {
     size_t length = 0;
     while (text[length]) length++;
-    clearsh_syscall(SYS_WRITE, (uint32_t)text, length, 0, 0);
+    lucid_write(text, (uint32_t)length);
 }
 
 void terminal_putc(char c)
 {
-    clearsh_syscall(SYS_WRITE, (uint32_t)&c, 1, 0, 0);
+    lucid_write(&c, 1);
 }
 
 uint32_t terminal_read_key(void)

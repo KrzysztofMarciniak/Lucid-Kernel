@@ -1,4 +1,5 @@
 INIT_BOOT=terminal,gdt,idt,pic,timer,pmm,acpi,vmm,heap,ata,usermode,ramfs,syscall,init
+SYSCALLS=write,exit,readline,fs_read,fs_write,fs_list,readkey,clear,shutdown,getticks,fork,exec,wait,reap,terminal_size,fs_stat
 
 TERMINAL_IMPL=dual
 GDT_IMPL=flat
@@ -16,6 +17,22 @@ INIT_IMPL=bootstrap
 KMALLOC_TEST_IMPL=basic
 USERMODE_IMPL=iret3
 SYSCALL_IMPL=int80
+SYSCALL_WRITE_IMPL=basic
+SYSCALL_EXIT_IMPL=basic
+SYSCALL_READLINE_IMPL=basic
+SYSCALL_FS_READ_IMPL=basic
+SYSCALL_FS_WRITE_IMPL=basic
+SYSCALL_FS_LIST_IMPL=basic
+SYSCALL_READKEY_IMPL=basic
+SYSCALL_CLEAR_IMPL=basic
+SYSCALL_SHUTDOWN_IMPL=basic
+SYSCALL_GETTICKS_IMPL=basic
+SYSCALL_FORK_IMPL=basic
+SYSCALL_EXEC_IMPL=basic
+SYSCALL_WAIT_IMPL=basic
+SYSCALL_REAP_IMPL=basic
+SYSCALL_TERMINAL_SIZE_IMPL=basic
+SYSCALL_FS_STAT_IMPL=basic
 USERMODE_TEST_IMPL=basic
 
 MEMORY_MB=256

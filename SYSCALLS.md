@@ -7,9 +7,11 @@ user-mapped pages before the kernel reads or writes them. `0xFFFFFFFF` means
 the requested operation failed. `exit` returns control to the kernel instead
 of returning to the caller.
 
-The public numbers and argument layouts are defined in
-[`recipes/syscall.h`](recipes/syscall.h). The same list is readable at runtime
-in `/system/info/syscalls`.
+Each public syscall number and argument contract lives in its own header,
+such as [`recipes/syscall_write.h`](recipes/syscall_write.h). The
+[`recipes/syscall.h`](recipes/syscall.h) umbrella includes these headers for
+existing callers. The same list is readable at runtime in
+`/system/info/syscalls`.
 
 | Number | Name | Arguments | Result |
 |---:|---|---|---|
@@ -73,12 +75,24 @@ cannot be overwritten with file contents.
 
 ## Adding a syscall
 
-1. Assign a new stable number and document its argument contract in
-   `recipes/syscall.h`.
-2. Add a dispatch branch in `impl/syscall/int80/syscall.c`. Validate every
-   user pointer and its full byte range before dereferencing it; bound copies
-   and return an explicit error value for invalid requests.
-3. Add a narrow userspace wrapper or shell builtin if the operation should be
-   available to Clearsh. Do not give shell expressions raw kernel pointers.
-4. Update `/system/info/syscalls` in the RAMFS seed data and this reference.
-5. Add a focused ring-3 test for success and invalid arguments.
+1. Add `recipes/syscall_<name>.h` with a stable `SYS_<NAME>` number and a
+   concise register/return contract. Include it from `recipes/syscall.h` to
+   preserve the umbrella API, or include it directly from new callers.
+2. Add an implementation such as
+   `impl/syscall/<name>/basic/syscall_<name>.c`. Implement a handler taking a
+   `syscall_frame *`, validate every user pointer and full byte range before
+   dereferencing it, bound copies, and set an explicit error result for invalid
+   requests. Register it with `SYSCALL_HANDLER(symbol, SYS_<NAME>, handler)`;
+   the linker collects registered handlers, so no dispatch branch is needed.
+3. Add the name to `SYSCALLS` and set `SYSCALL_<NAME>_IMPL=basic` in
+   `config.mk`. The build verifies the contract and selected handler exist and
+   compiles only the configured syscall modules; different calls can select
+   different implementation directories.
+4. Add a narrow typed userspace wrapper or shell builtin if the operation
+   should be available to Clearsh. Do not give shell expressions raw kernel
+   pointers.
+5. Update `/system/info/syscalls` in the RAMFS seed data and this reference.
+6. Add a focused ring-3 test for success and invalid arguments.
+
+`SYS_READLINE` uses a registered handler, but its editing, history, and
+completion helper implementation remains in `impl/syscall/int80/syscall.c`.

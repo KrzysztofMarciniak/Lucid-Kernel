@@ -52,7 +52,7 @@ Eye terminal running Clearsh.
 ```
 ./build.sh                  build only
 ./build.sh run              build + boot in QEMU (serial output in terminal)
-./build.sh test             build + boot headless, serial output to stdout
+./build.sh test             headless smoke test (auto-exits after ring-3 SYS_WRITE)
 ./build.sh disk             create a bootable 128 MiB BIOS disk image
 ./build.sh disk-run         create and boot that image in QEMU
 ./build.sh clean            remove build artifacts
@@ -80,9 +80,12 @@ make get-font
 `./build.sh run` boots into the terminal-only serial console by default, using
 text-mode dimensions instead of assuming a graphical framebuffer. Use
 `QEMU_DISPLAY=gtk ./build.sh run` for the graphical framebuffer VM, or
-`./build.sh test` for a headless serial smoke test. If the bundled compiler
-and image tools are missing, `./build.sh install-all` builds local copies under
-`.thirdparty/local`.
+`./build.sh test` for a bounded, headless serial smoke test. It checks that an
+invalid `SYS_WRITE` and `SYS_FS_READ` pointer are rejected, and exercises
+filesystem read/list/stat before exiting after a valid ring-3 write. The
+default timeout is 30 seconds; set `QEMU_TEST_TIMEOUT=60s` to extend it.
+If the bundled compiler and image tools are missing, `./build.sh install-all`
+builds local copies under `.thirdparty/local`.
 
 ### Build configuration
 
@@ -92,6 +95,8 @@ settings are:
 | Setting | Meaning |
 |---|---|
 | `INIT_BOOT` | Comma-separated list of boot recipes. Order matters: the build checks that each recipe's dependencies appear earlier in the list. |
+| `SYSCALLS` | Comma-separated list of enabled syscall modules. Each name selects `recipes/syscall_<name>.h`; its `SYSCALL_<NAME>_IMPL` setting selects `impl/syscall/<name>/<implementation>/syscall_<name>.c`. |
+| `SYSCALL_IMPL` | Selects the syscall transport/dispatcher implementation, such as `int80`. Each syscall handler is selected independently with `SYSCALL_<NAME>_IMPL`, so different calls can use different implementations. |
 | `<RECIPE>_IMPL` | Selects the implementation directory for a recipe; for example, `TIMER_IMPL=pit250hz` selects `impl/timer/pit250hz`. The selected directory must exist. |
 | `MEMORY_MB` | RAM assigned to QEMU and the physical-memory range managed by the kernel's frame allocator. The allocator assumes this range is contiguous and does not yet read the firmware memory map. |
 | `LOW_RESERVED_MB` | Physical memory below this many MiB is reserved and never allocated; the default is 4 MiB. Use `1 <= LOW_RESERVED_MB < MEMORY_MB`. |

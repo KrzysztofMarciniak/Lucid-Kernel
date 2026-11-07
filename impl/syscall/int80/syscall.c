@@ -3,25 +3,14 @@
 #include "recipes/ramfs.h"
 #include "recipes/status.h"
 #include "recipes/terminal.h"
-#include "recipes/acpi.h"
 #include "recipes/timer.h"
 #include "recipes/usermode.h"
 #include "recipes/vmm.h"
-
-typedef usermode_frame syscall_frame;
+#include "impl/syscall/internal.h"
 
 extern void syscall_isr(void);
-
-static void poweroff_system(void)
-{
-    terminal_write("Powering off...\n");
-    terminal_flush();
-    __asm__ volatile ("cli");
-    acpi_poweroff();
-    terminal_write("Poweroff request returned; CPU halted.\n");
-    terminal_flush();
-    for (;;) __asm__ volatile ("hlt");
-}
+extern const syscall_handler_entry __start_syscall_handlers[];
+extern const syscall_handler_entry __stop_syscall_handlers[];
 
 #define COMMAND_HISTORY_SIZE 8
 #define COMMAND_HISTORY_LINE_SIZE SYS_LINE_MAX
@@ -579,7 +568,9 @@ static int complete_input(char *buffer,
     return 1;
 }
 
-static int user_range_valid(uint32_t address, uint32_t length, int write)
+int syscall_user_range_valid(uint32_t address,
+                             uint32_t length,
+                             int write)
 {
     if (length == 0) return 1;
     if (address + length - 1 < address) return 0;
@@ -608,20 +599,7 @@ static int bounded_string_length(const char *text,
     return 0;
 }
 
-typedef enum {
-    SYSCALL_FILE_OUTSIDE,
-    SYSCALL_FILE_DIRECTORY,
-    SYSCALL_FILE_UNKNOWN,
-    SYSCALL_FILE_WRITE,
-    SYSCALL_FILE_READKEY,
-    SYSCALL_FILE_CLEAR,
-    SYSCALL_FILE_SHUTDOWN,
-    SYSCALL_FILE_GET_TICKS,
-    SYSCALL_FILE_TERMINAL_SIZE,
-    SYSCALL_FILE_REAP
-} syscall_file_kind;
-
-static int text_equals(const char *left, const char *right)
+int syscall_text_equals(const char *left, const char *right)
 {
     while (*left && *left == *right) {
         left++;
@@ -630,7 +608,7 @@ static int text_equals(const char *left, const char *right)
     return *left == *right;
 }
 
-static syscall_file_kind syscall_file_lookup(const char *path)
+syscall_file_kind syscall_file_lookup(const char *path)
 {
     static const char prefix[] = "/system/syscalls";
     size_t i = 0;
@@ -643,15 +621,15 @@ static syscall_file_kind syscall_file_lookup(const char *path)
     if (path[i] != '/') return SYSCALL_FILE_OUTSIDE;
 
     const char *name = path + i + 1;
-    if (text_equals(name, "write")) return SYSCALL_FILE_WRITE;
-    if (text_equals(name, "readkey")) return SYSCALL_FILE_READKEY;
-    if (text_equals(name, "clear")) return SYSCALL_FILE_CLEAR;
-    if (text_equals(name, "shutdown")) return SYSCALL_FILE_SHUTDOWN;
-    if (text_equals(name, "get_ticks")) return SYSCALL_FILE_GET_TICKS;
-    if (text_equals(name, "terminal_size")) {
+    if (syscall_text_equals(name, "write")) return SYSCALL_FILE_WRITE;
+    if (syscall_text_equals(name, "readkey")) return SYSCALL_FILE_READKEY;
+    if (syscall_text_equals(name, "clear")) return SYSCALL_FILE_CLEAR;
+    if (syscall_text_equals(name, "shutdown")) return SYSCALL_FILE_SHUTDOWN;
+    if (syscall_text_equals(name, "get_ticks")) return SYSCALL_FILE_GET_TICKS;
+    if (syscall_text_equals(name, "terminal_size")) {
         return SYSCALL_FILE_TERMINAL_SIZE;
     }
-    if (text_equals(name, "reap")) return SYSCALL_FILE_REAP;
+    if (syscall_text_equals(name, "reap")) return SYSCALL_FILE_REAP;
     return SYSCALL_FILE_UNKNOWN;
 }
 
@@ -669,16 +647,16 @@ static size_t format_decimal(char *buffer, uint32_t number)
     return count;
 }
 
-static int syscall_file_list(const char *path,
-                             char *buffer,
-                             size_t capacity,
-                             size_t *length)
+int syscall_file_list(const char *path,
+                      char *buffer,
+                      size_t capacity,
+                      size_t *length)
 {
     static const char *const names[] = {
         "write", "readkey", "clear", "shutdown",
         "get_ticks", "terminal_size", "reap"
     };
-    if (text_equals(path, "/system")) {
+    if (syscall_text_equals(path, "/system")) {
         static const char child[] = "syscalls\n";
         if (ramfs_list(path, buffer, capacity, length) ||
             *length + sizeof(child) - 1 > capacity) {
@@ -708,10 +686,10 @@ static int syscall_file_list(const char *path,
     return 1;
 }
 
-static int syscall_file_read(const char *path,
-                             char *buffer,
-                             size_t capacity,
-                             size_t *length)
+int syscall_file_read(const char *path,
+                      char *buffer,
+                      size_t capacity,
+                      size_t *length)
 {
     syscall_file_kind kind = syscall_file_lookup(path);
     if (kind == SYSCALL_FILE_OUTSIDE) return 0;
@@ -754,9 +732,9 @@ static int syscall_file_read(const char *path,
     return 1;
 }
 
-static int syscall_file_write(const char *path,
-                              const char *data,
-                              size_t length)
+int syscall_file_write(const char *path,
+                       const char *data,
+                       size_t length)
 {
     syscall_file_kind kind = syscall_file_lookup(path);
     if (kind == SYSCALL_FILE_OUTSIDE) return 0;
@@ -769,507 +747,312 @@ static int syscall_file_write(const char *path,
         return 1;
     }
     if (kind == SYSCALL_FILE_SHUTDOWN) {
-        poweroff_system();
+        syscall_poweroff_system();
     }
     return -1;
 }
 
-uint32_t syscall_dispatch(syscall_frame *frame)
+char *syscall_filesystem_buffer(void)
 {
-    if (frame->eax == SYS_WRITE) {
-        if (frame->ecx > SYS_WRITE_MAX ||
-            !user_range_valid(frame->ebx, frame->ecx, 0)) {
-            frame->eax = SYS_UNKNOWN_TEST;
-            return 0;
-        }
-        const char *text = (const char *)frame->ebx;
-        for (uint32_t i = 0; i < frame->ecx; i++) {
-            terminal_putc(text[i]);
-        }
-        frame->eax = frame->ecx;
+    return filesystem_buffer;
+}
+
+
+uint32_t syscall_readline_handle(syscall_frame *frame)
+{
+    if (frame->ecx < 2 || frame->ecx > SYS_LINE_MAX ||
+        !syscall_user_range_valid(frame->ebx, frame->ecx, 1)) {
+        frame->eax = SYS_UNKNOWN_TEST;
         return 0;
     }
 
-    if (frame->eax == SYS_READLINE) {
-        if (frame->ecx < 2 || frame->ecx > SYS_LINE_MAX ||
-            !user_range_valid(frame->ebx, frame->ecx, 1)) {
+    int completion_enabled = 0;
+    if (frame->edx || frame->esi) {
+        size_t directory_length;
+        size_t prompt_length;
+        if (!frame->edx || frame->esi != sizeof(readline_completion) ||
+            !syscall_user_range_valid(frame->edx, frame->esi, 0)) {
             frame->eax = SYS_UNKNOWN_TEST;
             return 0;
         }
-
-        int completion_enabled = 0;
-        if (frame->edx || frame->esi) {
-            size_t directory_length;
-            size_t prompt_length;
-            if (!frame->edx || frame->esi != sizeof(readline_completion) ||
-                !user_range_valid(frame->edx, frame->esi, 0)) {
-                frame->eax = SYS_UNKNOWN_TEST;
-                return 0;
-            }
-            const uint8_t *source = (const uint8_t *)frame->edx;
-            uint8_t *destination = (uint8_t *)&readline_completion;
-            for (size_t i = 0; i < sizeof(readline_completion); i++) {
-                destination[i] = source[i];
-            }
-            if (readline_completion.function_names_length >=
-                    sizeof(readline_completion.function_names) ||
-                readline_completion.current_directory[0] != '/' ||
-                !bounded_string_length(
-                    readline_completion.current_directory,
-                    sizeof(readline_completion.current_directory),
-                    &directory_length
-                ) ||
-                !bounded_string_length(
-                    readline_completion.prompt,
-                    sizeof(readline_completion.prompt),
-                    &prompt_length
-                ) ||
-                (readline_completion.function_names_length &&
-                 readline_completion.function_names[
-                     readline_completion.function_names_length - 1
-                 ] != '\n') ||
-                readline_completion.function_names[
-                    readline_completion.function_names_length
-                ] != '\0') {
-                frame->eax = SYS_UNKNOWN_TEST;
-                return 0;
-            }
-            for (size_t i = 0;
-                 i < readline_completion.function_names_length;
-                 i++) {
-                uint8_t candidate =
-                    (uint8_t)readline_completion.function_names[i];
-                if (candidate == '\0' ||
-                    (candidate < 32 && candidate != '\n')) {
-                    frame->eax = SYS_UNKNOWN_TEST;
-                    return 0;
-                }
-            }
-            (void)directory_length;
-            (void)prompt_length;
-            completion_enabled = 1;
+        const uint8_t *source = (const uint8_t *)frame->edx;
+        uint8_t *destination = (uint8_t *)&readline_completion;
+        for (size_t i = 0; i < sizeof(readline_completion); i++) {
+            destination[i] = source[i];
         }
-
-        char *buffer = (char *)frame->ebx;
-        uint32_t length = 0;
-        uint32_t cursor = 0;
-        uint32_t history_cursor = command_history_count;
-        command_history_draft_valid = 0;
-        buffer[0] = '\0';
-        for (;;) {
-            terminal_cursor_show();
-            int c = terminal_getchar();
-            terminal_cursor_hide();
-            if (c == '\n') {
-                complete_delimiters(
-                    buffer, frame->ecx, &length, &cursor
-                );
-                terminal_putc('\n');
-                buffer[length] = '\0';
-                remember_command(buffer, length);
-                command_history_draft_valid = 0;
-                frame->eax = length;
+        if (readline_completion.function_names_length >=
+                sizeof(readline_completion.function_names) ||
+            readline_completion.current_directory[0] != '/' ||
+            !bounded_string_length(
+                readline_completion.current_directory,
+                sizeof(readline_completion.current_directory),
+                &directory_length
+            ) ||
+            !bounded_string_length(
+                readline_completion.prompt,
+                sizeof(readline_completion.prompt),
+                &prompt_length
+            ) ||
+            (readline_completion.function_names_length &&
+             readline_completion.function_names[
+                 readline_completion.function_names_length - 1
+             ] != '\n') ||
+            readline_completion.function_names[
+                readline_completion.function_names_length
+            ] != '\0') {
+            frame->eax = SYS_UNKNOWN_TEST;
+            return 0;
+        }
+        for (size_t i = 0;
+             i < readline_completion.function_names_length;
+             i++) {
+            uint8_t candidate =
+                (uint8_t)readline_completion.function_names[i];
+            if (candidate == '\0' ||
+                (candidate < 32 && candidate != '\n')) {
+                frame->eax = SYS_UNKNOWN_TEST;
                 return 0;
             }
-            if (c == TERMINAL_KEY_UP) {
-                if (history_cursor > 0) {
-                    if (history_cursor == command_history_count) {
-                        for (uint32_t i = 0; i <= length; i++) {
-                            command_history_draft[i] = buffer[i];
-                        }
-                        command_history_draft_valid = 1;
+        }
+        (void)directory_length;
+        (void)prompt_length;
+        completion_enabled = 1;
+    }
+
+    char *buffer = (char *)frame->ebx;
+    uint32_t length = 0;
+    uint32_t cursor = 0;
+    uint32_t history_cursor = command_history_count;
+    command_history_draft_valid = 0;
+    buffer[0] = '\0';
+    for (;;) {
+        terminal_cursor_show();
+        int c = terminal_getchar();
+        terminal_cursor_hide();
+        if (c == '\n') {
+            complete_delimiters(
+                buffer, frame->ecx, &length, &cursor
+            );
+            terminal_putc('\n');
+            buffer[length] = '\0';
+            remember_command(buffer, length);
+            command_history_draft_valid = 0;
+            frame->eax = length;
+            return 0;
+        }
+        if (c == TERMINAL_KEY_UP) {
+            if (history_cursor > 0) {
+                if (history_cursor == command_history_count) {
+                    for (uint32_t i = 0; i <= length; i++) {
+                        command_history_draft[i] = buffer[i];
                     }
-                    history_cursor--;
-                    replace_input_line(
-                        buffer,
-                        frame->ecx,
-                        &length,
-                        &cursor,
-                        command_history[history_cursor]
-                    );
+                    command_history_draft_valid = 1;
                 }
-                continue;
-            }
-            if (c == TERMINAL_KEY_DOWN) {
-                if (history_cursor < command_history_count) {
-                    history_cursor++;
-                    replace_input_line(
-                        buffer,
-                        frame->ecx,
-                        &length,
-                        &cursor,
-                        history_cursor == command_history_count
-                            ? (command_history_draft_valid
-                                ? command_history_draft
-                                : "")
-                            : command_history[history_cursor]
-                    );
-                }
-                continue;
-            }
-            if (c == TERMINAL_KEY_CTRL_LEFT) {
-                uint32_t previous = cursor;
-                move_word_left(buffer, &cursor);
-                while (previous > cursor) {
-                    terminal_putc('\b');
-                    previous--;
-                }
-                continue;
-            }
-            if (c == TERMINAL_KEY_CTRL_RIGHT) {
-                uint32_t previous = cursor;
-                move_word_right(buffer, length, &cursor);
-                while (previous < cursor) {
-                    terminal_putc(buffer[previous]);
-                    previous++;
-                }
-                continue;
-            }
-            if (c == TERMINAL_KEY_LEFT) {
-                if (cursor > 0) {
-                    cursor--;
-                    terminal_putc('\b');
-                }
-                continue;
-            }
-            if (c == TERMINAL_KEY_RIGHT) {
-                if (cursor < length) {
-                    terminal_putc(buffer[cursor]);
-                    cursor++;
-                }
-                continue;
-            }
-            if (c == SYS_KEY_CTRL_A || c == TERMINAL_KEY_HOME) {
-                while (cursor > 0) {
-                    cursor--;
-                    terminal_putc('\b');
-                }
-                continue;
-            }
-            if (c == SYS_KEY_CTRL_E || c == TERMINAL_KEY_END) {
-                while (cursor < length) {
-                    terminal_putc(buffer[cursor]);
-                    cursor++;
-                }
-                continue;
-            }
-            if (c == SYS_KEY_CTRL_U) {
-                uint32_t previous_length = length;
-                while (cursor > 0) {
-                    delete_input(buffer, &length, &cursor, 1);
-                }
-                if (length != previous_length) {
-                    history_cursor = command_history_count;
-                    command_history_draft_valid = 0;
-                }
-                continue;
-            }
-            if (c == SYS_KEY_CTRL_K) {
-                uint32_t previous_length = length;
-                while (cursor < length) {
-                    delete_input(buffer, &length, &cursor, 0);
-                }
-                if (length != previous_length) {
-                    history_cursor = command_history_count;
-                    command_history_draft_valid = 0;
-                }
-                continue;
-            }
-            if (c == SYS_KEY_CTRL_W) {
-                uint32_t previous_length = length;
-                while (cursor > 0 &&
-                       input_is_word_boundary(buffer[cursor - 1])) {
-                    delete_input(buffer, &length, &cursor, 1);
-                }
-                while (cursor > 0 &&
-                       !input_is_word_boundary(buffer[cursor - 1])) {
-                    delete_input(buffer, &length, &cursor, 1);
-                }
-                if (length != previous_length) {
-                    history_cursor = command_history_count;
-                    command_history_draft_valid = 0;
-                }
-                continue;
-            }
-            if (c == SYS_KEY_CTRL_L) {
-                redraw_input_line(
-                    completion_enabled ? readline_completion.prompt : "",
+                history_cursor--;
+                replace_input_line(
                     buffer,
-                    length,
-                    cursor
+                    frame->ecx,
+                    &length,
+                    &cursor,
+                    command_history[history_cursor]
                 );
-                continue;
             }
-            if (c == '\b') {
-                uint32_t previous_length = length;
-                delete_input(buffer, &length, &cursor, 1);
-                if (length != previous_length) {
-                    history_cursor = command_history_count;
-                    command_history_draft_valid = 0;
-                }
-                continue;
+            continue;
+        }
+        if (c == TERMINAL_KEY_DOWN) {
+            if (history_cursor < command_history_count) {
+                history_cursor++;
+                replace_input_line(
+                    buffer,
+                    frame->ecx,
+                    &length,
+                    &cursor,
+                    history_cursor == command_history_count
+                        ? (command_history_draft_valid
+                            ? command_history_draft
+                            : "")
+                        : command_history[history_cursor]
+                );
             }
-            if (c == TERMINAL_KEY_DELETE) {
-                uint32_t previous_length = length;
-                delete_input(buffer, &length, &cursor, 0);
-                if (length != previous_length) {
-                    history_cursor = command_history_count;
-                    command_history_draft_valid = 0;
-                }
-                continue;
+            continue;
+        }
+        if (c == TERMINAL_KEY_CTRL_LEFT) {
+            uint32_t previous = cursor;
+            move_word_left(buffer, &cursor);
+            while (previous > cursor) {
+                terminal_putc('\b');
+                previous--;
             }
-            if (c == '\t') {
-                uint32_t previous_length = length;
-                if (completion_enabled) {
-                    (void)complete_input(buffer, frame->ecx,
-                                         &length, &cursor);
-                }
-                if (length != previous_length) {
-                    history_cursor = command_history_count;
-                    command_history_draft_valid = 0;
-                }
-                continue;
+            continue;
+        }
+        if (c == TERMINAL_KEY_CTRL_RIGHT) {
+            uint32_t previous = cursor;
+            move_word_right(buffer, length, &cursor);
+            while (previous < cursor) {
+                terminal_putc(buffer[previous]);
+                previous++;
             }
-            if (c < 0 || c > 0xFF) continue;
-            uint8_t input = (uint8_t)c;
-            int in_string = input_inside_string(buffer, cursor);
-            if ((input == ')' && !in_string && cursor < length &&
-                 buffer[cursor] == ')') ||
-                (input == '"' && cursor < length &&
-                 buffer[cursor] == '"')) {
+            continue;
+        }
+        if (c == TERMINAL_KEY_LEFT) {
+            if (cursor > 0) {
+                cursor--;
+                terminal_putc('\b');
+            }
+            continue;
+        }
+        if (c == TERMINAL_KEY_RIGHT) {
+            if (cursor < length) {
                 terminal_putc(buffer[cursor]);
                 cursor++;
-                continue;
             }
-            if (input < 32 || input == 0x7F) continue;
-            if (input == '(' && !in_string) {
-                if (!insert_input(
-                        buffer, frame->ecx, &length, &cursor, "()", 2, 1)) {
-                    char open = '(';
-                    insert_input(
-                        buffer, frame->ecx, &length, &cursor, &open, 1, 1
-                    );
-                }
-                history_cursor = command_history_count;
-                command_history_draft_valid = 0;
-                continue;
+            continue;
+        }
+        if (c == SYS_KEY_CTRL_A || c == TERMINAL_KEY_HOME) {
+            while (cursor > 0) {
+                cursor--;
+                terminal_putc('\b');
             }
-            if (input == '"' && !in_string) {
-                if (!insert_input(
-                        buffer, frame->ecx, &length, &cursor, "\"\"", 2, 1)) {
-                    char quote = '"';
-                    insert_input(
-                        buffer, frame->ecx, &length, &cursor, &quote, 1, 1
-                    );
-                }
-                history_cursor = command_history_count;
-                command_history_draft_valid = 0;
-                continue;
+            continue;
+        }
+        if (c == SYS_KEY_CTRL_E || c == TERMINAL_KEY_END) {
+            while (cursor < length) {
+                terminal_putc(buffer[cursor]);
+                cursor++;
             }
-            char text[1] = { (char)input };
-            if (insert_input(
-                    buffer, frame->ecx, &length, &cursor, text, 1, 1)) {
+            continue;
+        }
+        if (c == SYS_KEY_CTRL_U) {
+            uint32_t previous_length = length;
+            while (cursor > 0) {
+                delete_input(buffer, &length, &cursor, 1);
+            }
+            if (length != previous_length) {
                 history_cursor = command_history_count;
                 command_history_draft_valid = 0;
             }
+            continue;
         }
-    }
-
-    if (frame->eax == SYS_READKEY) {
-        frame->eax = (uint32_t)terminal_getchar();
-        return 0;
-    }
-
-    if (frame->eax == SYS_CLEAR) {
-        terminal_clear();
-        frame->eax = 0;
-        return 0;
-    }
-
-    if (frame->eax == SYS_SHUTDOWN) {
-        poweroff_system();
-    }
-
-    if (frame->eax == SYS_GETTICKS) {
-        frame->eax = timer_get_ticks();
-        return 0;
-    }
-
-    if (frame->eax == SYS_GET_TERMINAL_SIZE) {
-        frame->eax = terminal_get_size();
-        return 0;
-    }
-
-    if (frame->eax == SYS_FS_STAT) {
-        char path[SYS_PATH_MAX];
-        if (frame->ecx == 0 || frame->ecx >= sizeof(path) ||
-            !user_range_valid(frame->ebx, frame->ecx, 0)) {
-            frame->eax = SYS_UNKNOWN_TEST;
-            return 0;
-        }
-
-        const char *user_path = (const char *)frame->ebx;
-        for (uint32_t i = 0; i < frame->ecx; i++) path[i] = user_path[i];
-        path[frame->ecx] = '\0';
-
-        syscall_file_kind kind = syscall_file_lookup(path);
-        if (kind == SYSCALL_FILE_DIRECTORY) {
-            frame->eax = 1;
-            return 0;
-        }
-        if (kind != SYSCALL_FILE_OUTSIDE) {
-            if (kind == SYSCALL_FILE_UNKNOWN) {
-                frame->eax = SYS_UNKNOWN_TEST;
-                return 0;
+        if (c == SYS_KEY_CTRL_K) {
+            uint32_t previous_length = length;
+            while (cursor < length) {
+                delete_input(buffer, &length, &cursor, 0);
             }
-            frame->eax = 0;
-            return 0;
+            if (length != previous_length) {
+                history_cursor = command_history_count;
+                command_history_draft_valid = 0;
+            }
+            continue;
         }
-
-        int is_directory = ramfs_is_directory(path);
-        frame->eax = is_directory < 0
-            ? SYS_UNKNOWN_TEST
-            : (uint32_t)is_directory;
-        return 0;
+        if (c == SYS_KEY_CTRL_W) {
+            uint32_t previous_length = length;
+            while (cursor > 0 &&
+                   input_is_word_boundary(buffer[cursor - 1])) {
+                delete_input(buffer, &length, &cursor, 1);
+            }
+            while (cursor > 0 &&
+                   !input_is_word_boundary(buffer[cursor - 1])) {
+                delete_input(buffer, &length, &cursor, 1);
+            }
+            if (length != previous_length) {
+                history_cursor = command_history_count;
+                command_history_draft_valid = 0;
+            }
+            continue;
+        }
+        if (c == SYS_KEY_CTRL_L) {
+            redraw_input_line(
+                completion_enabled ? readline_completion.prompt : "",
+                buffer,
+                length,
+                cursor
+            );
+            continue;
+        }
+        if (c == '\b') {
+            uint32_t previous_length = length;
+            delete_input(buffer, &length, &cursor, 1);
+            if (length != previous_length) {
+                history_cursor = command_history_count;
+                command_history_draft_valid = 0;
+            }
+            continue;
+        }
+        if (c == TERMINAL_KEY_DELETE) {
+            uint32_t previous_length = length;
+            delete_input(buffer, &length, &cursor, 0);
+            if (length != previous_length) {
+                history_cursor = command_history_count;
+                command_history_draft_valid = 0;
+            }
+            continue;
+        }
+        if (c == '\t') {
+            uint32_t previous_length = length;
+            if (completion_enabled) {
+                (void)complete_input(buffer, frame->ecx,
+                                     &length, &cursor);
+            }
+            if (length != previous_length) {
+                history_cursor = command_history_count;
+                command_history_draft_valid = 0;
+            }
+            continue;
+        }
+        if (c < 0 || c > 0xFF) continue;
+        uint8_t input = (uint8_t)c;
+        int in_string = input_inside_string(buffer, cursor);
+        if ((input == ')' && !in_string && cursor < length &&
+             buffer[cursor] == ')') ||
+            (input == '"' && cursor < length &&
+             buffer[cursor] == '"')) {
+            terminal_putc(buffer[cursor]);
+            cursor++;
+            continue;
+        }
+        if (input < 32 || input == 0x7F) continue;
+        if (input == '(' && !in_string) {
+            if (!insert_input(
+                    buffer, frame->ecx, &length, &cursor, "()", 2, 1)) {
+                char open = '(';
+                insert_input(
+                    buffer, frame->ecx, &length, &cursor, &open, 1, 1
+                );
+            }
+            history_cursor = command_history_count;
+            command_history_draft_valid = 0;
+            continue;
+        }
+        if (input == '"' && !in_string) {
+            if (!insert_input(
+                    buffer, frame->ecx, &length, &cursor, "\"\"", 2, 1)) {
+                char quote = '"';
+                insert_input(
+                    buffer, frame->ecx, &length, &cursor, &quote, 1, 1
+                );
+            }
+            history_cursor = command_history_count;
+            command_history_draft_valid = 0;
+            continue;
+        }
+        char text[1] = { (char)input };
+        if (insert_input(
+                buffer, frame->ecx, &length, &cursor, text, 1, 1)) {
+            history_cursor = command_history_count;
+            command_history_draft_valid = 0;
+        }
     }
+}
 
-    if (frame->eax == SYS_FORK) {
-        frame->eax = usermode_process_fork(frame);
-        return 0;
-    }
-
-    if (frame->eax == SYS_EXEC) {
-        char path[SYS_PATH_MAX];
-        if (frame->ecx == 0 || frame->ecx >= sizeof(path) ||
-            !user_range_valid(frame->ebx, frame->ecx, 0)) {
-            frame->eax = SYS_UNKNOWN_TEST;
-            return 0;
+uint32_t syscall_dispatch(syscall_frame *frame)
+{
+    const syscall_handler_entry *entry;
+    for (entry = __start_syscall_handlers;
+         entry < __stop_syscall_handlers;
+         entry++) {
+        if (entry->number == frame->eax) {
+            return entry->handler(frame);
         }
-
-        const char *user_path = (const char *)frame->ebx;
-        for (uint32_t i = 0; i < frame->ecx; i++) path[i] = user_path[i];
-        path[frame->ecx] = '\0';
-        int result = usermode_process_exec(path, frame);
-        if (result < 0) {
-            return (uint32_t)usermode_process_schedule(frame);
-        }
-        frame->eax = result ? 0 : SYS_UNKNOWN_TEST;
-        return 0;
-    }
-
-    if (frame->eax == SYS_WAIT) {
-        if (usermode_process_wait(frame->ebx, frame)) {
-            return (uint32_t)usermode_process_schedule(frame);
-        }
-        return 0;
-    }
-
-    if (frame->eax == SYS_REAP) {
-        frame->eax = usermode_process_reap();
-        return 0;
-    }
-
-    if (frame->eax == SYS_EXIT) {
-        usermode_process_exit(frame->ebx);
-        return (uint32_t)usermode_process_schedule(frame);
-    }
-
-    if (frame->eax == SYS_FS_READ) {
-        char path[SYS_PATH_MAX];
-        size_t length = 0;
-        if (frame->ecx == 0 || frame->ecx >= sizeof(path) ||
-            frame->esi > sizeof(filesystem_buffer) ||
-            !user_range_valid(frame->ebx, frame->ecx, 0) ||
-            !user_range_valid(frame->edx, frame->esi, 1)) {
-            frame->eax = SYS_UNKNOWN_TEST;
-            return 0;
-        }
-
-        const char *user_path = (const char *)frame->ebx;
-        for (uint32_t i = 0; i < frame->ecx; i++) path[i] = user_path[i];
-        path[frame->ecx] = '\0';
-        int syscall_result = syscall_file_read(
-            path, filesystem_buffer, frame->esi, &length
-        );
-        if (syscall_result < 0 ||
-            (syscall_result == 0 &&
-             ramfs_read(path, filesystem_buffer, frame->esi, &length))) {
-            frame->eax = SYS_UNKNOWN_TEST;
-            return 0;
-        }
-
-        char *user_buffer = (char *)frame->edx;
-        for (size_t i = 0; i < length; i++) {
-            user_buffer[i] = filesystem_buffer[i];
-        }
-        frame->eax = (uint32_t)length;
-        return 0;
-    }
-
-    if (frame->eax == SYS_FS_WRITE) {
-        char path[SYS_PATH_MAX];
-        if (frame->ecx == 0 || frame->ecx >= sizeof(path) ||
-            frame->esi > sizeof(filesystem_buffer) ||
-            !user_range_valid(frame->ebx, frame->ecx, 0) ||
-            !user_range_valid(frame->edx, frame->esi, 0)) {
-            frame->eax = SYS_UNKNOWN_TEST;
-            return 0;
-        }
-
-        const char *user_path = (const char *)frame->ebx;
-        const char *user_data = (const char *)frame->edx;
-        for (uint32_t i = 0; i < frame->ecx; i++) path[i] = user_path[i];
-        path[frame->ecx] = '\0';
-        for (uint32_t i = 0; i < frame->esi; i++) {
-            filesystem_buffer[i] = user_data[i];
-        }
-        int syscall_result = syscall_file_write(
-            path, filesystem_buffer, frame->esi
-        );
-        if (syscall_result < 0 ||
-            (syscall_result == 0 &&
-             ramfs_write(path, filesystem_buffer, frame->esi))) {
-            frame->eax = SYS_UNKNOWN_TEST;
-            return 0;
-        }
-        if (text_equals(path, "/system/config/clearsh/zoom") ||
-            text_equals(path, "/system/config/brain.conf")) {
-            terminal_config_reload();
-        }
-        frame->eax = frame->esi;
-        return 0;
-    }
-
-    if (frame->eax == SYS_FS_LIST) {
-        char path[SYS_PATH_MAX];
-        size_t length = 0;
-        if (frame->ecx == 0 || frame->ecx >= sizeof(path) ||
-            frame->esi > sizeof(filesystem_buffer) ||
-            !user_range_valid(frame->ebx, frame->ecx, 0) ||
-            !user_range_valid(frame->edx, frame->esi, 1)) {
-            frame->eax = SYS_UNKNOWN_TEST;
-            return 0;
-        }
-
-        const char *user_path = (const char *)frame->ebx;
-        for (uint32_t i = 0; i < frame->ecx; i++) path[i] = user_path[i];
-        path[frame->ecx] = '\0';
-        int syscall_result = syscall_file_list(
-            path, filesystem_buffer, frame->esi, &length
-        );
-        if (syscall_result < 0 ||
-            (syscall_result == 0 &&
-             ramfs_list(path, filesystem_buffer, frame->esi, &length))) {
-            frame->eax = SYS_UNKNOWN_TEST;
-            return 0;
-        }
-
-        char *user_buffer = (char *)frame->edx;
-        for (size_t i = 0; i < length; i++) {
-            user_buffer[i] = filesystem_buffer[i];
-        }
-        frame->eax = (uint32_t)length;
-        return 0;
     }
 
     frame->eax = SYS_UNKNOWN_TEST;
