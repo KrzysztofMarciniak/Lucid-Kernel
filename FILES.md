@@ -40,7 +40,8 @@ The initial tree includes:
 │   │   ├── pioneer
 │   │   ├── brain
 │   │   ├── eye
-│   │   └── clearsh
+│   │   ├── clearsh
+│   │   └── statusbar
 │   └── config/
 │       ├── defaults/
 │       │   ├── shell
@@ -49,7 +50,9 @@ The initial tree includes:
 │       ├── brain/
 │       │   ├── keys
 │       │   ├── layout
-│       │   └── theme
+│       │   ├── theme
+│       │   ├── statusbar
+│       │   └── statusbar_output
 │       ├── clearsh/
 │       │   ├── prompt
 │       │   └── zoom
@@ -57,20 +60,26 @@ The initial tree includes:
 │       ├── resolution
 │       └── pioneer/
 │           ├── boot
-│           ├── welcome.clearsh
-│           └── system.clearsh
+│           ├── welcome.csh
+│           └── system.csh
 ├── users/
 │   └── root/
-│       └── welcome
+│       ├── welcome
+│       └── example-scripts/
+│           ├── hello.csh
+│           ├── system-info.csh
+│           ├── list-files.csh
+│           ├── config.csh
+│           ├── statusbar.csh
+│           └── write-note.csh
 └── tmp/
 ```
 
 Clearsh can list, read, and write files in this tree. `/system/info/memory`,
 `/system/info/processes`, `/system/info/storage`, and `/system/info/uptime` are
 generated when read; `/system/info/syscalls` documents the current user-mode
-syscall ABI. The virtual `/system/bin` directory lists the embedded
-`/system/bin/pioneer` and `/system/bin/clearsh` executables; the image contents
-are in the kernel's registry rather than RAMFS files. The broader layout below
+syscall ABI. The virtual `/system/bin` directory lists the embedded executables; their
+image contents are in the kernel's registry rather than RAMFS files. The broader layout below
 describes intended interfaces; directories and files not listed above are not
 yet implemented.
 

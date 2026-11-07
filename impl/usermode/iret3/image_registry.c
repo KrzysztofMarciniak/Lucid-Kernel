@@ -11,6 +11,8 @@ extern const uint8_t eye_image_start[];
 extern const uint8_t eye_image_end[];
 extern const uint8_t clearsh_image_start[];
 extern const uint8_t clearsh_image_end[];
+extern const uint8_t statusbar_image_start[];
+extern const uint8_t statusbar_image_end[];
 
 static const userland_image images[] = {
     {
@@ -38,6 +40,13 @@ static const userland_image images[] = {
         "/system/bin/clearsh",
         clearsh_image_start,
         clearsh_image_end,
+        USER_IMAGE_BASE,
+        USER_IMAGE_MEMORY_SIZE
+    },
+    {
+        "/system/bin/statusbar",
+        statusbar_image_start,
+        statusbar_image_end,
         USER_IMAGE_BASE,
         USER_IMAGE_MEMORY_SIZE
     }

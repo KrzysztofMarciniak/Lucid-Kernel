@@ -16,20 +16,26 @@ each listed script in order.
 
 Each nonblank line in `boot` is a script path; relative paths are resolved
 inside `/system/config/pioneer/`, absolute paths are accepted, and `#` starts a
-comment. The default list is empty so startup reaches the prompt without
-running informational scripts. The list and scripts can be edited from
+comment. Clearsh scripts use the `.csh` extension and begin with
+`#!/system/bin/clearsh`, which the script runner ignores. The default list is
+empty so startup reaches the prompt without running informational scripts.
+The list and scripts can be edited from
 Clearsh, and changes persist when booted from a disk image with the Lucid data
 partition.
 
 Changes to the window-manager default apply on the next boot. Terminal changes
 apply the next time Brain opens a terminal; shell changes apply the next time
-Eye starts. Brain reads `/system/config/brain/layout`, `keys`, and `theme` for
-desktop/layout policy, keybindings, and display appearance. The defaults show
+Eye starts. Brain reads `/system/config/brain/layout`, `keys`, `theme`, and
+`statusbar` for desktop/layout policy, keybindings, appearance, and periodic
+status scripts. `interval_ms` controls the script period; the script writes
+its display text to the configured output file (update the script target if
+you change that path). Brain starts the background Clearsh status worker with
+its manager process. The defaults show
 the log view in window 1 on desktop 1, then switch to desktop 2 and open the
 startup terminal there. Clearsh reads `/system/config/clearsh/prompt` before
 each prompt; `%p` expands to the current directory and `%%` to a literal `%`.
 Pioneer boot scripts remain in `/system/config/pioneer/boot`.
 
-This is a single-child process model, not general multitasking. The recipe list
-in `config.mk` remains the place for kernel-level initialization;
+Lucid has a small preemptive user-process scheduler, not POSIX multitasking.
+The recipe list in `config.mk` remains the place for kernel-level initialization;
 `/system/config/pioneer/boot` configures only userspace startup scripts.

@@ -31,12 +31,14 @@ existing callers. The same list is readable at runtime in
 | 13 | `SYS_REAP` | none | releases exited child processes |
 | 14 | `SYS_GET_TERMINAL_SIZE` | none | columns in high 16 bits, rows in low 16 bits |
 | 15 | `SYS_FS_STAT` | `EBX` path, `ECX` path length | 1 for directory, 0 for file |
+| 16 | `SYS_SLEEP` | `EBX` tick count | zero after the requested delay |
 
 Clearsh and other user programs can call `lucid_user_syscall()` from
 `recipes/syscall.h` when compiled with `LUCID_USER`. Clearsh also provides a
 checked `(syscall number ...)` form for the implemented calls. Arguments are
 typed shell values: text for `SYS_WRITE`, file values for filesystem calls,
-and no arguments for the other calls. Clearsh allocates user buffers itself;
+a number of ticks for `SYS_SLEEP`, and no arguments for other calls.
+Clearsh allocates user buffers itself;
 scripts cannot supply raw pointers. `SYS_EXIT` is deliberately unavailable through the generic syscall form;
 Clearsh exposes it as `(exit [status])`. Brain manages Eyes as preemptively
 scheduled processes, and the kernel reclaims exited children with

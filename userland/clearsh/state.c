@@ -5,3 +5,4 @@ size_t arena_used;
 char current_directory[PATH_MAX] = "/users/root";
 char pending_script_path[PATH_MAX];
 int script_pending;
+int clearsh_quiet_output;

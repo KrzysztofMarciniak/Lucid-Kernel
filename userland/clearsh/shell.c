@@ -30,8 +30,10 @@ static value run_script_body(const value *file)
     size_t length = 0;
     if (ramfs_read(file->data.text, source, sizeof(source) - 1, &length)) {
         value error = make_error("script could not be read");
-        print_value(&error);
-        terminal_putc('\n');
+        if (!clearsh_quiet_output) {
+            print_value(&error);
+            terminal_putc('\n');
+        }
         return error;
     }
     source[length] = '\0';
@@ -50,11 +52,13 @@ static value run_script_body(const value *file)
         arena_used = 0;
         value result = evaluate_line(line);
         if (result.type == VALUE_ERROR) {
-            print_value(&result);
-            terminal_putc('\n');
+            if (!clearsh_quiet_output) {
+                print_value(&result);
+                terminal_putc('\n');
+            }
             return result;
         }
-        if (result.type != VALUE_NIL) {
+        if (result.type != VALUE_NIL && !clearsh_quiet_output) {
             print_value(&result);
             terminal_putc('\n');
         }
@@ -70,14 +74,27 @@ static value run_script(const value *file)
 {
     if (script_depth >= MAX_DEPTH) {
         value error = make_error("script nesting is too deep");
-        print_value(&error);
-        terminal_putc('\n');
+        if (!clearsh_quiet_output) {
+            print_value(&error);
+            terminal_putc('\n');
+        }
         return error;
     }
 
     script_depth++;
     value result = run_script_body(file);
     script_depth--;
+    return result;
+}
+
+value clearsh_run_statusbar_script(const char *path)
+{
+    value file = make_value(VALUE_FILE);
+    string_copy(file.data.text, path, sizeof(file.data.text));
+    arena_used = 0;
+    clearsh_quiet_output = 1;
+    value result = run_script(&file);
+    clearsh_quiet_output = 0;
     return result;
 }
 

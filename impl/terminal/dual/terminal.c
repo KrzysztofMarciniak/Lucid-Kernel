@@ -14,6 +14,8 @@
 #define CURIE_HEIGHT 12
 #define TERMINAL_ZOOM_MAX 4
 #define TERMINAL_STATUS_MAX 64
+#define TERMINAL_STATUSBAR_PATH_MAX 256
+#define TERMINAL_STATUSBAR_TEXT_MAX 128
 #define TERMINAL_BAR_WIDTH 14
 #define VBE_CONTROL_INFO_SIZE 512u
 #define VBE_MODE_LIST_MAX 1024u
@@ -723,6 +725,59 @@ static void append_status_number(char *buffer,
     }
 }
 
+static void append_script_status(char *buffer,
+                                 uint32_t capacity,
+                                 uint32_t *length)
+{
+    static const char config_path[] = "/system/config/brain/statusbar";
+    char config[512];
+    size_t config_length = 0;
+    if (ramfs_read(config_path, config, sizeof(config), &config_length) != 0 ||
+        config_length >= sizeof(config)) {
+        return;
+    }
+
+    const char *value;
+    size_t value_length;
+    if (terminal_config_value(config, config_length, "enabled",
+                              &value, &value_length) &&
+        !config_value_equals(value, value_length, "1")) {
+        return;
+    }
+    if (!terminal_config_value(config, config_length, "output",
+                               &value, &value_length) ||
+        value_length == 0 ||
+        value_length >= TERMINAL_STATUSBAR_PATH_MAX ||
+        value[0] != '/') {
+        return;
+    }
+
+    char output_path[TERMINAL_STATUSBAR_PATH_MAX];
+    for (size_t i = 0; i < value_length; i++) {
+        if (value[i] <= ' ' || value[i] == 0x7F) return;
+        output_path[i] = value[i];
+    }
+    output_path[value_length] = '\0';
+
+    char output[TERMINAL_STATUSBAR_TEXT_MAX];
+    size_t output_length = 0;
+    if (ramfs_read(output_path, output, sizeof(output), &output_length) != 0) {
+        return;
+    }
+    if (output_length > sizeof(output)) return;
+    while (output_length &&
+           (output[output_length - 1] == '\n' ||
+            output[output_length - 1] == '\r')) {
+        output_length--;
+    }
+    if (!output_length) return;
+
+    append_status_text(buffer, capacity, length, " | ");
+    for (size_t i = 0; i < output_length && *length < capacity; i++) {
+        buffer[(*length)++] = output[i];
+    }
+}
+
 static uint8_t vga_color_index(uint32_t color)
 {
     static const uint32_t palette[16] = {
@@ -812,6 +867,7 @@ static void draw_status_bar(void)
                          ));
     append_status_text(text, sizeof(text), &length, " | ");
     append_status_text(text, sizeof(text), &length, terminal_status);
+    append_script_status(text, sizeof(text), &length);
 
     uint32_t capacity = terminal_bar == TERMINAL_BAR_LEFT ||
                         terminal_bar == TERMINAL_BAR_RIGHT
@@ -1080,6 +1136,14 @@ void terminal_config_reload(void)
 {
     terminal_config_loaded = 0;
     terminal_refresh();
+}
+
+void terminal_statusbar_refresh(void)
+{
+    if (!terminal_config_loaded) load_terminal_config();
+    initialize_surfaces();
+    update_surface_dimensions();
+    draw_status_bar();
 }
 
 static void redraw_surface(uint32_t slot)

@@ -340,7 +340,7 @@ build() {
     objs="$objs $BUILD_DIR/curie_font.o"
 
     if echo ",${INIT_BOOT:-}," | grep -q ",usermode,"; then
-        for app in brain eye pioneer clearsh; do
+        for app in brain eye pioneer clearsh statusbar; do
             app_dir="$SCRIPT_DIR/userland/$app"
             app_objs=""
             for src in "$app_dir"/*.c; do
@@ -351,6 +351,11 @@ build() {
             done
             "$CC" $CFLAGS "$SRC_DIR/string.c" \
                 -o "$BUILD_DIR/${app}_string.o"
+            if [ "$app" = statusbar ]; then
+                for shared_obj in "$BUILD_DIR"/clearsh_user_*.o; do
+                    app_objs="$app_objs $shared_obj"
+                done
+            fi
             "$LD" -m elf_i386 -T "$app_dir/user.ld" --oformat binary \
                 -o "$BUILD_DIR/$app.bin" \
                 $app_objs "$BUILD_DIR/${app}_string.o"

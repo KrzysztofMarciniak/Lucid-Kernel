@@ -23,6 +23,7 @@
 #include "syscall_terminal_size.h"
 #include "syscall_fs_stat.h"
 #include "syscall_write.h"
+#include "syscall_sleep.h"
 
 #define SYS_WM_OPEN 0x300u
 #define SYS_WM_EXIT 0x301u

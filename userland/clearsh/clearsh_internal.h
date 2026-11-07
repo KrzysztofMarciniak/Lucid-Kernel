@@ -97,6 +97,7 @@ extern size_t arena_used;
 extern char current_directory[PATH_MAX];
 extern char pending_script_path[PATH_MAX];
 extern int script_pending;
+extern int clearsh_quiet_output;
 
 uint32_t clearsh_syscall(uint32_t number, uint32_t arg1, uint32_t arg2,
                          uint32_t arg3, uint32_t arg4);
@@ -132,5 +133,6 @@ value evaluate_line(const char *line);
 value call_function(function_id id, value *args, size_t count);
 value edit_file(const value *file);
 value run_pending_script(void);
+value clearsh_run_statusbar_script(const char *path);
 
 #endif

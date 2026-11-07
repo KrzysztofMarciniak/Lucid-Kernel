@@ -33,6 +33,7 @@ struct process {
     int reap_on_switch;
     int is_window;
     int is_manager;
+    int is_statusbar;
     uint32_t desktop;
     process *parent;
     const char *name;
@@ -469,6 +470,7 @@ uint32_t usermode_process_fork(usermode_frame *frame)
     child->reap_on_switch = 0;
     child->is_window = 0;
     child->is_manager = 0;
+    child->is_statusbar = 0;
     child->parent = parent;
     child->name = parent->name;
     child->space = child_space;
@@ -507,6 +509,7 @@ static void release_process(process *entry)
     uint32_t slot = (uint32_t)(entry - process_table) + 1;
     if (window_manager_slot == slot) window_manager_slot = 0;
     entry->is_manager = 0;
+    entry->is_statusbar = 0;
     input_queue_head[slot] = 0;
     input_queue_tail[slot] = 0;
 }
@@ -853,12 +856,17 @@ int usermode_process_exec(const char *path, usermode_frame *frame)
     }
     static const char eye_path[] = "/system/bin/eye";
     static const char brain_path[] = "/system/bin/brain";
+    static const char statusbar_path[] = "/system/bin/statusbar";
     static const char terminal_config[] =
         "/system/config/defaults/terminal";
     static const char manager_config[] =
         "/system/config/defaults/window_manager";
     int is_terminal = is_configured_program(path, terminal_config);
     int is_manager = is_configured_program(path, manager_config);
+    int is_statusbar = 1;
+    for (uint32_t i = 0; i < sizeof(statusbar_path); i++) {
+        if (path[i] != statusbar_path[i]) is_statusbar = 0;
+    }
     if (!is_terminal) {
         is_terminal = 1;
         for (uint32_t i = 0; i < sizeof(eye_path); i++) {
@@ -904,6 +912,7 @@ int usermode_process_exec(const char *path, usermode_frame *frame)
     frame->eflags = 0x202;
     frame->user_esp = USERMODE_STACK_TOP;
     process->name = image->path;
+    process->is_statusbar = is_statusbar;
     uint32_t slot = usermode_process_current_slot();
     if (!(is_manager && slot == 1)) {
         terminal_process_reset(slot);
@@ -955,6 +964,17 @@ static int process_mark_exited(process *exiting, uint32_t status)
 {
     exiting->exit_status = status;
     exiting->state = PROCESS_EXITED;
+    if (exiting->is_manager) {
+        for (uint32_t i = 0; i < PROCESS_LIMIT; i++) {
+            process *child = &process_table[i];
+            if (child->in_use && child->is_statusbar &&
+                child->parent == exiting) {
+                child->state = PROCESS_EXITED;
+                child->exit_status = 0;
+                release_process(child);
+            }
+        }
+    }
     if (exiting->is_window) {
         uint32_t slot = exiting == &root_process
             ? 0

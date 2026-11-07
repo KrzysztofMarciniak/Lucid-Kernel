@@ -46,6 +46,7 @@ static uint32_t syscall_fs_write_handle(syscall_frame *frame)
         syscall_text_equals(path, "/system/config/resolution")) {
         terminal_config_reload();
     }
+    terminal_statusbar_refresh();
     frame->eax = frame->esi;
     return 0;
 }

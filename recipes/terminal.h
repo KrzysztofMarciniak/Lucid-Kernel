@@ -36,6 +36,7 @@ int terminal_framebuffer_mapping(uint32_t *base, uint32_t *length);
 uint32_t terminal_get_size(void);
 void terminal_refresh(void);
 void terminal_config_reload(void);
+void terminal_statusbar_refresh(void);
 void terminal_process_reset(uint32_t slot);
 void terminal_set_status(const char *text);
 

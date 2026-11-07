@@ -286,6 +286,13 @@ starts a terminal on desktop 2. Empty desktops default to black; the theme file
 can change that. For example, from Clearsh run
 `(write (file /system/config/brain/layout) (text "desktops=5\nstartup_desktop=2\nlog_desktop=1\nmaster_ratio=60\n"))`.
 
+The status-bar worker runs the Clearsh script named by
+`/system/config/brain/statusbar` every `interval_ms` (default: 5000). A script
+writes its text to the configured `output` path; if you change that path, update
+the script's output target as well. The sample
+`/users/root/example-scripts/statusbar.csh` shows the format. Changes to the
+script and interval take effect while Brain is running.
+
 `disk` produces `lucid-disk.img`: a GRUB/MBR boot disk with a FAT32 boot
 partition and a Lucid data partition for persistent shell files. It is safe to
 test with QEMU. Writing the image to a physical disk overwrites that disk;

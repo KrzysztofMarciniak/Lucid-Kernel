@@ -193,6 +193,7 @@ value call_function(function_id id, value *args, size_t count)
             if (count != 2 || args[1].type != VALUE_TEXT) {
                 return make_error("syscall 0 expects one text value");
             }
+            if (clearsh_quiet_output) return make_number(0);
             result = clearsh_syscall(
                 SYS_WRITE,
                 (uint32_t)args[1].data.text,
@@ -208,6 +209,9 @@ value call_function(function_id id, value *args, size_t count)
         case SYS_READLINE: {
             char line[LINE_MAX];
             if (count != 1) return make_error("syscall 2 takes no arguments");
+            if (clearsh_quiet_output) {
+                return make_error("status scripts cannot read interactive input");
+            }
             result = clearsh_syscall(
                 SYS_READLINE, (uint32_t)line, sizeof(line), 0, 0
             );
@@ -279,12 +283,16 @@ value call_function(function_id id, value *args, size_t count)
 
         case SYS_READKEY:
             if (count != 1) return make_error("syscall 6 takes no arguments");
+            if (clearsh_quiet_output) {
+                return make_error("status scripts cannot read interactive input");
+            }
             return make_number((int32_t)clearsh_syscall(
                 SYS_READKEY, 0, 0, 0, 0
             ));
 
         case SYS_CLEAR:
             if (count != 1) return make_error("syscall 7 takes no arguments");
+            if (clearsh_quiet_output) return make_number(0);
             return make_number((int32_t)clearsh_syscall(
                 SYS_CLEAR, 0, 0, 0, 0
             ));
@@ -309,6 +317,16 @@ value call_function(function_id id, value *args, size_t count)
             return make_number((int32_t)clearsh_syscall(
                 SYS_GET_TERMINAL_SIZE, 0, 0, 0, 0
             ));
+
+        case SYS_SLEEP:
+            if (count != 2 || !get_number(&args[1], &number) || number < 0) {
+                return make_error("syscall 16 expects a nonnegative tick count");
+            }
+            result = clearsh_syscall(SYS_SLEEP, (uint32_t)number, 0, 0, 0);
+            if (result == SYS_UNKNOWN_TEST) {
+                return make_error("syscall 16 failed");
+            }
+            return make_number((int32_t)result);
 
         case SYS_EXIT:
             return make_error("syscall 1 is unavailable while Clearsh is running");
@@ -473,7 +491,7 @@ value call_function(function_id id, value *args, size_t count)
         terminal_write("Files: (read (file path)), (write (file path) (text value))\n");
         terminal_write("Dirs: (ls), (ls (file /path)), (cd (file /path)), (pwd)\n");
         terminal_write("Try: (print (read (file /system/info/name)))\n");
-        terminal_write("Text: text concat length print; run: (run (file /users/root/start.clearsh))\n");
+        terminal_write("Text: text concat length print; run: (run (file /users/root/start.csh))\n");
         terminal_write("Math: + - * / % abs min max pow; compare: = < <= > >=\n");
         terminal_write("Logic: not and or if; if evaluates only its selected branch\n");
         terminal_write("Lists: list map filter; functions: (lambda (x) expr) or (λ ...)\n");

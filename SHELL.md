@@ -69,8 +69,10 @@ with `/`. Quoted strings support `\n`, `\t`, `\"`, and `\\` escapes.
 `ls` lists a directory, `cd` changes the current directory, and `pwd` returns
 it. The filesystem includes `/system/info`, `/system/config/clearsh`,
 `/system/config/pioneer`, `/system/config/resolution`, `/system/processes`,
-`/users/root`, `/tmp`, and the root-level guides `/README.TXT`, `/CLEARSH.TXT`,
-`/BRAIN.TXT`, and `/SYSTEM.TXT`. Read the guide
+`/users/root/example-scripts`, `/tmp`, and the root-level guides
+`/README.TXT`, `/CLEARSH.TXT`, `/BRAIN.TXT`, and `/SYSTEM.TXT`. Run an example
+with `(run (file /users/root/example-scripts/hello.csh))`; `write-note.csh`
+demonstrates writing a file under `/tmp`. Read the guide
 index with `(print (read (file /README.TXT)))`. It supports 64 entries, paths
 up to 255 characters, and files up to 4096 bytes. Disk-image boots preserve
 changes across reboots.
@@ -159,8 +161,8 @@ the current process or PID 1; ambiguous or missing names return an error.
 (print value)
 (text value)
 (list value ...)
-(run (file /users/root/start.clearsh))
-(vi (file /users/root/start.clearsh))
+(run (file /users/root/start.csh))
+(vi (file /users/root/start.csh))
 (exit)
 (install)
 (shutdown)
@@ -184,10 +186,14 @@ the required tables, then try the QEMU/Bochs legacy power ports. When a QEMU
 guest powers off, QEMU exits normally; this does not shut down the host.
 
 Pioneer reads `/system/config/pioneer/boot` before showing the prompt. Each
-nonblank line names a Clearsh script; relative paths resolve inside
+nonblank line names a Clearsh script; use the `.csh` extension. Relative paths
+resolve inside
 `/system/config/pioneer/`, absolute paths are accepted, and lines beginning
 with `#` are comments. Edit the list or scripts with `(vi (file ...))`.
-Scripts contain one expression per line; a leading `#!` line is ignored.
+Start each script with `#!/system/bin/clearsh`; Clearsh ignores the shebang
+line when running it. This identifies the interpreter; Clearsh does not
+implement shell-style variable assignments such as `CLEARSH=1`.
+Scripts contain one expression per line.
 Only the embedded Pioneer and Clearsh images are currently executable.
 There is no general executable loader, preemptive multitasking, or POSIX
 compatibility.

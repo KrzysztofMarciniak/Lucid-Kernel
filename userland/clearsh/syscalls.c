@@ -11,6 +11,7 @@ uint32_t clearsh_syscall(uint32_t number,
 
 void terminal_write(const char *text)
 {
+    if (clearsh_quiet_output) return;
     size_t length = 0;
     while (text[length]) length++;
     lucid_write(text, (uint32_t)length);
@@ -18,6 +19,7 @@ void terminal_write(const char *text)
 
 void terminal_putc(char c)
 {
+    if (clearsh_quiet_output) return;
     lucid_write(&c, 1);
 }
 
@@ -33,6 +35,7 @@ uint32_t terminal_get_size(void)
 
 void terminal_clear(void)
 {
+    if (clearsh_quiet_output) return;
     clearsh_syscall(SYS_CLEAR, 0, 0, 0, 0);
 }
 

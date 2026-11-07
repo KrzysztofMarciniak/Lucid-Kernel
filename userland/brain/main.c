@@ -33,9 +33,28 @@ static uint32_t launch_terminal(void)
     for (;;) { }
 }
 
+static void launch_statusbar_worker(void)
+{
+    static const char statusbar[] = "/system/bin/statusbar";
+    uint32_t pid = lucid_user_syscall(SYS_FORK, 0, 0, 0, 0);
+    if (pid == SYS_UNKNOWN_TEST) {
+        write_text("Brain: no process slot for the status-bar worker\n");
+        return;
+    }
+    if (pid != 0) return;
+
+    lucid_user_syscall(
+        SYS_EXEC, (uint32_t)statusbar, sizeof(statusbar) - 1, 0, 0
+    );
+    write_text("Brain: could not start the status-bar worker\n");
+    lucid_user_syscall(SYS_EXIT, 127, 0, 0, 0);
+    for (;;) { }
+}
+
 __attribute__((section(".entry")))
 void brain_user_entry(void)
 {
+    launch_statusbar_worker();
     if (launch_terminal() == SYS_UNKNOWN_TEST) {
         write_text(
             "Brain: could not launch terminal; check "
