@@ -1,15 +1,19 @@
 # Lucid Kernel
 
-A non-POSIX, KISS kernel. Everything is a file.
+Lucid is a tiny, non-POSIX x86 hobby OS built on KISS principles and a file-based design. Its user ABI has just two syscalls: path-based read and write. All other kernel services are exposed as virtual files. Featuring a preemptive kernel, Brain WM, Eye terminal, and Clearsh Lisp shell, it targets a 1 MiB kernel and 10 MiB bootable ISO, and already runs on real ThinkPad X201 hardware.
 
 ![Logo](imgs/LogoLucid.png)
 
 ## Philosophy
 
-- **KISS above all** — the simplest correct implementation wins over the flexible/general one.
-- **Non-POSIX** — no obligation to POSIX semantics, syscalls, or compatibility layers.
-- **Everything is a file** — processes, devices, IPC, network, memory: all reachable and
-  controllable through one namespace. No ioctl. No sysctl. No hidden side channels.
+- **KISS** — keep the user-mode ABI small: two numbered, path-based read/write
+  syscalls.
+- **File-oriented interface** — higher-level kernel services are accessed
+  through virtual paths, alongside regular RAMFS files.
+- **Modular architecture** — kernel components use selectable implementations
+  configured in `config.mk`.
+- **Non-POSIX by design** — Lucid is not bound to POSIX semantics, though it
+  includes a small POSIX-style file-I/O compatibility layer.
 
 ![Terminal Screenshot](imgs/screenshot.png)
 
