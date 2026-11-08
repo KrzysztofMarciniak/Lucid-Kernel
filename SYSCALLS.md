@@ -4,8 +4,9 @@ Lucid installs the `int 0x80` handler in the `syscall` recipe. A call places
 the syscall number in `EAX` and up to four arguments in `EBX`, `ECX`, `EDX`,
 and `ESI`; the return value is in `EAX`. User pointers are checked against
 user-mapped pages before the kernel reads or writes them. `0xFFFFFFFF` means
-the requested operation failed. `exit` returns control to the kernel instead
-of returning to the caller.
+the requested operation failed for the original syscall set. The
+`SYSCALL_POSIX_*` calls instead return negative errno values for failures.
+`exit` returns control to the kernel instead of returning to the caller.
 
 Each public syscall number and argument contract lives in its own header,
 such as [`recipes/syscall_write.h`](recipes/syscall_write.h). The
@@ -32,6 +33,23 @@ existing callers. The same list is readable at runtime in
 | 14 | `SYS_GET_TERMINAL_SIZE` | none | columns in high 16 bits, rows in low 16 bits |
 | 15 | `SYS_FS_STAT` | `EBX` path, `ECX` path length | 1 for directory, 0 for file |
 | 16 | `SYS_SLEEP` | `EBX` tick count | zero after the requested delay |
+| 17 | `SYSCALL_POSIX_OPEN` | `EBX` path, `ECX` flags | file descriptor; negative errno on failure |
+| 18 | `SYSCALL_POSIX_READ` | `EBX` descriptor, `ECX` output buffer, `EDX` byte count | bytes read; negative errno on failure |
+| 19 | `SYSCALL_POSIX_WRITE` | `EBX` descriptor, `ECX` input buffer, `EDX` byte count | bytes written; negative errno on failure |
+| 20 | `SYSCALL_POSIX_CLOSE` | `EBX` descriptor | zero; negative errno on failure |
+| 21 | `SYSCALL_POSIX_LSEEK` | `EBX` descriptor, `ECX` signed offset, `EDX` whence | resulting offset; negative errno on failure |
+| 22 | `SYSCALL_POSIX_UNLINK` | `EBX` path | zero; negative errno on failure |
+| 23 | `SYSCALL_POSIX_ACCESS` | `EBX` path, `ECX` mode | zero; negative errno on failure |
+| 24 | `SYSCALL_POSIX_GETCWD` | `EBX` buffer, `ECX` size | zero; negative errno on failure |
+
+Each POSIX syscall has an individual contract header, such as
+`recipes/syscall_posix_open.h`; `recipes/syscall_posix.h` includes the family
+headers and shared open flags. IDs 17–23 are POSIX.1-2008 file interfaces;
+`getcwd` (ID 24) was standardized in POSIX.1-2001 and remains in POSIX.1-2008.
+These labels identify the source API, not a claim of full standard conformance.
+Implementations are selected independently in `config.mk` and live under
+`impl/syscall/posix/<name>/<implementation>/`. Shared descriptor and
+process-lifecycle state lives in `impl/syscall/posix/common/posix.c`.
 
 Clearsh and other user programs can call `lucid_user_syscall()` from
 `recipes/syscall.h` when compiled with `LUCID_USER`. Clearsh also provides a
@@ -46,6 +64,21 @@ scheduled processes, and the kernel reclaims exited children with
 embedded-image table. See `SHELL.md` for examples. Named functions such as
 `(uptime)`, `read`, `write`, and `print` remain the simpler interfaces for
 common operations.
+
+The userland libc compatibility layer exposes `access`, `open`, `read`,
+`write`, `close`, `lseek`, `unlink`, and `getcwd` from `include/unistd.h` and
+`include/fcntl.h`. Relative paths are rooted at `/`; `getcwd` therefore always
+reports `/`, and `chdir` is not implemented. `access` supports only `F_OK`,
+since Lucid does not track POSIX permissions. Standard output/error descriptors
+write to the terminal; reading standard input is unsupported. File descriptors
+are inherited by `fork`, share their offsets, and close when a process exits.
+
+This is a deliberately small compatibility subset, not a full POSIX layer.
+Regular RAMFS files are limited to 4096 bytes; directory descriptors, metadata
+APIs, `mmap`, `munmap`, dynamic loading, and the broader hosted C runtime are not
+implemented. TinyCC 0.9.28rc is currently built for the host x86_64 Linux
+environment, and Lucid still embeds user programs as flat images with a 64 KiB
+build-time limit. TinyCC has not yet been built or run as a Lucid user program.
 
 `SYS_READLINE` remains usable with only `EBX` and `ECX`. Clearsh passes the
 optional `sys_readline_completion` structure in `EDX`/`ESI`; it contains the

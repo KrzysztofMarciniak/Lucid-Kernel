@@ -5,6 +5,7 @@
 ramfs_node ramfs_nodes[RAMFS_MAX_NODES];
 size_t ramfs_node_count;
 static ramfs_node write_backup;
+static ramfs_node unlink_backup;
 
 static size_t string_length(const char *s)
 {
@@ -378,4 +379,29 @@ int ramfs_is_directory(const char *path)
     ramfs_node *node = find_node(path);
     if (!node) return -1;
     return node->directory ? 1 : 0;
+}
+
+int ramfs_unlink(const char *path)
+{
+    if (!ramfs_valid_path(path)) return RAMFS_INVALID_PATH;
+    if (ramfs_info_is_dynamic(path) || is_embedded_program_path(path)) {
+        return RAMFS_READ_ONLY;
+    }
+
+    ramfs_node *node = find_node(path);
+    if (!node) return RAMFS_NOT_FOUND;
+    if (node->directory) return RAMFS_IS_DIRECTORY;
+
+    size_t index = (size_t)(node - ramfs_nodes);
+    unlink_backup = *node;
+    remove_node_at(index);
+    if (!ramfs_storage_sync()) {
+        for (size_t i = ramfs_node_count; i > index; i--) {
+            ramfs_nodes[i] = ramfs_nodes[i - 1];
+        }
+        ramfs_nodes[index] = unlink_backup;
+        ramfs_node_count++;
+        return RAMFS_NO_SPACE;
+    }
+    return RAMFS_OK;
 }

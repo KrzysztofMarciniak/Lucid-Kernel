@@ -3,7 +3,7 @@
 # Usage:
 #   ./build.sh                  build only
 #   ./build.sh run              build + boot in QEMU (serial text mode by default)
-#   ./build.sh test             headless smoke test; exits after ring-3 SYS_WRITE
+#   ./build.sh test             host wrapper tests + ring-3 POSIX file-I/O smoke test
 #   ./build.sh disk             create a bootable 128 MiB BIOS disk image
 #   ./build.sh disk-run         create and boot the disk image in QEMU
 #   ./build.sh clean            remove build artifacts
@@ -175,13 +175,23 @@ resolve_syscall_source() {
             ;;
     esac
 
-    source="$IMPL_DIR/syscall/$syscall_name/$impl/syscall_${syscall_name}.c"
-    if [ ! -f "$source" ]; then
-        echo "ERROR: $var_name=$impl but handler source $source does not exist" >&2
+    case "$syscall_name" in
+        posix_*)
+            posix_name="${syscall_name#posix_}"
+            module_dir="$IMPL_DIR/syscall/posix/$posix_name"
+            ;;
+        *)
+            module_dir="$IMPL_DIR/syscall/$syscall_name"
+            ;;
+    esac
+    source_dir="$module_dir/$impl"
+    handler_source="$source_dir/syscall_${syscall_name}.c"
+    if [ ! -f "$handler_source" ]; then
+        echo "ERROR: $var_name=$impl but handler source $handler_source does not exist" >&2
         exit 1
     fi
 
-    echo "$source"
+    echo "$handler_source"
 }
 
 # check_requires <ordered-space-separated-names>
@@ -305,6 +315,13 @@ for name in $names; do
                     echo "$source"
                 fi
             done
+            for source in "$impl_dir"/*.c "$impl_dir"/*.asm "$impl_dir"/*.s; do
+                [ -f "$source" ] || continue
+                case "$source" in
+                    "$impl_dir/syscall.c"|"$impl_dir/syscall.asm") continue ;;
+                esac
+                echo "$source"
+            done
 
             old_ifs="$IFS"
             IFS=','
@@ -314,6 +331,12 @@ for name in $names; do
                 IFS=','
             done
             IFS="$old_ifs"
+            source="$IMPL_DIR/syscall/posix/common/posix.c"
+            if [ ! -f "$source" ]; then
+                echo "ERROR: POSIX syscall support source $source does not exist" >&2
+                exit 1
+            fi
+            echo "$source"
         else
             find "$impl_dir" \( -name '*.c' -o -name '*.asm' -o -name '*.s' \) -type f
         fi
@@ -349,6 +372,13 @@ build() {
                 "$CC" $CFLAGS -DLUCID_USER "$src" -o "$obj"
                 app_objs="$app_objs $obj"
             done
+            if [ "$app" != statusbar ]; then
+                libc_obj="$BUILD_DIR/${app}_user_unistd.o"
+                echo "[cc] $SCRIPT_DIR/userland/libc/unistd.c (user libc)"
+                "$CC" $CFLAGS -DLUCID_USER \
+                    "$SCRIPT_DIR/userland/libc/unistd.c" -o "$libc_obj"
+                app_objs="$app_objs $libc_obj"
+            fi
             "$CC" $CFLAGS "$SRC_DIR/string.c" \
                 -o "$BUILD_DIR/${app}_string.o"
             if [ "$app" = statusbar ]; then
@@ -620,9 +650,23 @@ run() {
     run_qemu -cdrom "$ISO" -boot d -display "$QEMU_DISPLAY" -serial stdio -m "${MEMORY_MB}M"
 }
 
-# Headless boot with serial routed to stdout. QEMU exits after a successful
-# test syscall; timeout bounds failures that halt early.
+# Headless boot with serial routed to a log. The POSIX smoke test emits a
+# marker only after the user-mode file operations and their checks succeed.
 test() {
+    host_cc="${HOST_CC:-cc}"
+    command -v "$host_cc" >/dev/null 2>&1 || {
+        echo "ERROR: host C compiler '$host_cc' is required for compatibility tests" >&2
+        exit 1
+    }
+    mkdir -p "$BUILD_DIR"
+    "$host_cc" -I "$SCRIPT_DIR/include" -I "$SCRIPT_DIR" \
+        -DLUCID_USER -DLUCID_USER_SYSCALL_TEST \
+        "$SCRIPT_DIR/tests/posix_libc_test.c" \
+        "$SCRIPT_DIR/userland/libc/unistd.c" \
+        -o "$BUILD_DIR/posix_libc_test"
+    "$BUILD_DIR/posix_libc_test"
+    echo "[test] POSIX libc wrapper tests passed"
+
     serial_run_mode 1
     CFLAGS="$CFLAGS_BASE -DLUCID_TEST_MODE -c "
     build
@@ -639,7 +683,8 @@ test() {
         exit 1
     fi
     qemu_test_timeout="${QEMU_TEST_TIMEOUT:-30s}"
-    echo "[test] booting headless; expecting a successful ring-3 SYS_WRITE within $qemu_test_timeout"
+    qemu_test_log="$BUILD_DIR/qemu-test.log"
+    echo "[test] booting headless; expecting POSIX file-I/O tests to pass within $qemu_test_timeout"
     if timeout "$qemu_test_timeout" "$qemu_command" \
         -cdrom "$ISO" \
         -boot d \
@@ -649,18 +694,23 @@ test() {
         -no-reboot \
         -device isa-debug-exit,iobase=0xf4,iosize=0x04 \
         -d int,cpu_reset,guest_errors \
-        -D qemu.log
+        -D qemu.log >"$qemu_test_log" 2>&1
     then
-        echo "ERROR: QEMU exited without the successful syscall marker" >&2
+        echo "ERROR: QEMU exited without the POSIX test marker" >&2
         exit 1
     else
         qemu_status=$?
     fi
+    cat "$qemu_test_log"
     if [ "$qemu_status" -ne 33 ]; then
         echo "ERROR: QEMU test failed (status $qemu_status; expected 33 from debug-exit)" >&2
         exit 1
     fi
-    echo "[test] ring-3 SYS_WRITE completed successfully"
+    if ! grep -Fq "POSIX file descriptor tests passed" "$qemu_test_log"; then
+        echo "ERROR: POSIX file descriptor test marker was not emitted" >&2
+        exit 1
+    fi
+    echo "[test] ring-3 POSIX file-I/O tests completed successfully"
 }
 
 disk() {

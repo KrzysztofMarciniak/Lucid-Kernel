@@ -1,6 +1,9 @@
 #include "recipes/syscall.h"
 
+#include <errno.h>
+#include <fcntl.h>
 #include <stdint.h>
+#include <unistd.h>
 
 static uint32_t text_length(const char *text)
 {
@@ -56,6 +59,95 @@ static int run_default_window_manager(void)
 }
 
 #ifdef LUCID_TEST_MODE
+static void test_posix_file_io(void)
+{
+    static const char path[] = "/users/root/.lucid-posix-test";
+    static const char contents[] = "Lucid POSIX file I/O\n";
+    static const char suffix[] = "tail";
+    char buffer[sizeof(contents) + sizeof(suffix) - 2];
+    char cwd[2];
+
+    if (getcwd(cwd, sizeof(cwd)) != cwd ||
+        cwd[0] != '/' || cwd[1] != '\0') {
+        for (;;) { }
+    }
+
+    int fd = open(path, O_RDWR | O_CREAT | O_TRUNC, 0600);
+    if (fd < 0 ||
+        write(fd, contents, sizeof(contents) - 1) !=
+            (ssize_t)(sizeof(contents) - 1) ||
+        lseek(fd, 0, SEEK_SET) != 0) {
+        for (;;) { }
+    }
+
+    uint32_t child_pid = lucid_user_syscall(SYS_FORK, 0, 0, 0, 0);
+    if (child_pid == 0) {
+        char first;
+        if (read(fd, &first, 1) != 1 || first != contents[0]) {
+            for (;;) { }
+        }
+        exit_process(0);
+    }
+    if (child_pid == SYS_UNKNOWN_TEST ||
+        lucid_user_syscall(SYS_WAIT, child_pid, 0, 0, 0) != child_pid ||
+        read(fd, buffer, 1) != 1 || buffer[0] != contents[1] ||
+        lseek(fd, 0, SEEK_SET) != 0 ||
+        read(fd, buffer, sizeof(contents) - 1) !=
+            (ssize_t)(sizeof(contents) - 1)) {
+        for (;;) { }
+    }
+    for (uint32_t i = 0; i < sizeof(contents) - 1; i++) {
+        if (buffer[i] != contents[i]) {
+            for (;;) { }
+        }
+    }
+    if (close(fd) != 0) {
+        for (;;) { }
+    }
+    if (close(fd) != -1 || errno != EBADF) {
+        for (;;) { }
+    }
+
+    if (open(path, O_WRONLY | O_CREAT | O_EXCL, 0600) != -1 ||
+        errno != EEXIST) {
+        for (;;) { }
+    }
+
+    fd = open(path, O_WRONLY | O_APPEND);
+    if (fd < 0 ||
+        write(fd, suffix, sizeof(suffix) - 1) !=
+            (ssize_t)(sizeof(suffix) - 1) ||
+        close(fd) != 0) {
+        for (;;) { }
+    }
+
+    fd = open(path, O_RDONLY);
+    if (fd < 0 ||
+        write(fd, contents, 1) != -1 ||
+        errno != EBADF ||
+        read(fd, buffer, sizeof(buffer)) !=
+            (ssize_t)(sizeof(contents) + sizeof(suffix) - 2) ||
+        close(fd) != 0 ||
+        unlink(path) != 0 ||
+        access(path, F_OK) != -1 ||
+        errno != ENOENT) {
+        for (;;) { }
+    }
+    for (uint32_t i = 0; i < sizeof(contents) - 1; i++) {
+        if (buffer[i] != contents[i]) {
+            for (;;) { }
+        }
+    }
+    for (uint32_t i = 0; i < sizeof(suffix) - 1; i++) {
+        if (buffer[sizeof(contents) - 1 + i] != suffix[i]) {
+            for (;;) { }
+        }
+    }
+    if (access("users/root/welcome", F_OK) != 0) {
+        for (;;) { }
+    }
+}
+
 static void test_syscall_modules(void)
 {
     static const char zoom_path[] = "/system/config/clearsh/zoom";
@@ -279,6 +371,7 @@ static void test_syscall_modules(void)
     if (result != 1) {
         for (;;) { }
     }
+    test_posix_file_io();
 }
 #endif
 
@@ -290,6 +383,10 @@ void pioneer_user_entry(void)
         for (;;) { }
     }
     test_syscall_modules();
+    static const char test_success[] =
+        "POSIX file descriptor tests passed\n";
+    lucid_write(test_success, sizeof(test_success) - 1);
+    for (;;) { }
 #endif
     for (;;) {
         static const char eye[] = "/system/bin/eye";

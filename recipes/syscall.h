@@ -24,6 +24,7 @@
 #include "syscall_fs_stat.h"
 #include "syscall_write.h"
 #include "syscall_sleep.h"
+#include "syscall_posix.h"
 
 #define SYS_WM_OPEN 0x300u
 #define SYS_WM_EXIT 0x301u
@@ -44,7 +45,6 @@
 #define SYS_KEY_CTRL_L (SYS_KEY_CTRL_BASE + 12u)
 #define SYS_KEY_CTRL_U (SYS_KEY_CTRL_BASE + 21u)
 #define SYS_KEY_CTRL_W (SYS_KEY_CTRL_BASE + 23u)
-#define SYS_PATH_MAX 256u
 #define SYS_FILE_MAX 4096u
 #define SYS_LINE_MAX 2048u
 #define SYS_COMPLETION_NAMES_MAX 1024u

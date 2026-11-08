@@ -1,5 +1,5 @@
 INIT_BOOT=terminal,gdt,idt,pic,timer,pmm,acpi,vmm,heap,ata,usermode,ramfs,syscall,init
-SYSCALLS=write,exit,readline,fs_read,fs_write,fs_list,readkey,clear,shutdown,getticks,fork,exec,wait,reap,terminal_size,fs_stat,sleep
+SYSCALLS=write,exit,readline,fs_read,fs_write,fs_list,readkey,clear,shutdown,getticks,fork,exec,wait,reap,terminal_size,fs_stat,sleep,posix_open,posix_read,posix_write,posix_close,posix_lseek,posix_unlink,posix_access,posix_getcwd
 
 TERMINAL_IMPL=dual
 GDT_IMPL=flat
@@ -34,6 +34,14 @@ SYSCALL_REAP_IMPL=basic
 SYSCALL_TERMINAL_SIZE_IMPL=basic
 SYSCALL_FS_STAT_IMPL=basic
 SYSCALL_SLEEP_IMPL=basic
+SYSCALL_POSIX_OPEN_IMPL=basic
+SYSCALL_POSIX_READ_IMPL=basic
+SYSCALL_POSIX_WRITE_IMPL=basic
+SYSCALL_POSIX_CLOSE_IMPL=basic
+SYSCALL_POSIX_LSEEK_IMPL=basic
+SYSCALL_POSIX_UNLINK_IMPL=basic
+SYSCALL_POSIX_ACCESS_IMPL=basic
+SYSCALL_POSIX_GETCWD_IMPL=basic
 USERMODE_TEST_IMPL=basic
 
 MEMORY_MB=256

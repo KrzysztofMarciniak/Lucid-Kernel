@@ -13,14 +13,6 @@
 #define RAMFS_DISK_VERSION 1u
 #define RAMFS_PARTITION_TYPE 0xDAu
 
-#define RAMFS_OK 0
-#define RAMFS_NOT_FOUND 1
-#define RAMFS_NOT_DIRECTORY 2
-#define RAMFS_TOO_LARGE 3
-#define RAMFS_INVALID_PATH 4
-#define RAMFS_NO_SPACE 5
-#define RAMFS_READ_ONLY 6
-
 typedef struct {
     char path[RAMFS_PATH_MAX];
     char data[RAMFS_FILE_MAX];

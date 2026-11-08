@@ -4,8 +4,16 @@
 #include <stdint.h>
 
 #define SYS_UNKNOWN_TEST 0xFFFFFFFFu
+#define SYS_PATH_MAX 256u
 
 #ifdef LUCID_USER
+#ifdef LUCID_USER_SYSCALL_TEST
+uint32_t lucid_user_syscall(uint32_t number,
+                           uint32_t arg1,
+                           uint32_t arg2,
+                           uint32_t arg3,
+                           uint32_t arg4);
+#else
 static inline uint32_t lucid_user_syscall(uint32_t number,
                                            uint32_t arg1,
                                            uint32_t arg2,
@@ -21,6 +29,7 @@ static inline uint32_t lucid_user_syscall(uint32_t number,
     );
     return result;
 }
+#endif
 #endif
 
 #endif
