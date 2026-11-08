@@ -11,6 +11,123 @@ errno values.
 | 3 | `SYS_FS_READ` | `EBX` path, `ECX` path length, `EDX` output buffer, `ESI` capacity | bytes read |
 | 4 | `SYS_FS_WRITE` | `EBX` path, `ECX` path length, `EDX` input buffer, `ESI` byte count | bytes written |
 
+## Examples
+
+User programs normally use the libc wrappers rather than issuing `int 0x80`
+themselves. For example, `/system/info/version` contains the version string:
+
+```c
+#include <lucid.h>
+#include "recipes/syscall_abi.h"
+
+char version[32];
+uint32_t length = lucid_fs_read(
+    "/system/info/version", version, sizeof(version) - 1
+);
+if (length == SYS_UNKNOWN_TEST) {
+    /* The read failed. */
+} else {
+    version[length] = '\0';
+    /* Use version, for example "0.1.0-pre\n". */
+}
+```
+
+Writing a regular RAMFS file creates it if its parent directory exists. The
+returned count is the number of bytes written; the buffer is not NUL-terminated
+by the syscall:
+
+```c
+#include <lucid.h>
+#include "recipes/syscall_abi.h"
+
+static const char path[] = "/tmp/syscall-example";
+static const char message[] = "written through syscall 4\n";
+
+uint32_t written = lucid_fs_write(path, message, sizeof(message) - 1);
+if (written == SYS_UNKNOWN_TEST) {
+    /* The write failed. */
+} else {
+    char contents[64];
+    uint32_t length = lucid_fs_read(path, contents, sizeof(contents) - 1);
+    if (length == SYS_UNKNOWN_TEST) {
+        /* The read failed. */
+    } else {
+        contents[length] = '\0';
+        /* contents now holds the file data as a C string. */
+    }
+}
+```
+
+A read from a virtual endpoint can also perform an operation. This blocks
+until 18 timer ticks have elapsed; endpoint reads that take no input use a
+zero capacity:
+
+```c
+char unused;
+uint32_t result = lucid_fs_read("/system/time/sleep/18", &unused, 0);
+if (result == SYS_UNKNOWN_TEST) {
+    /* The sleep request failed. */
+}
+```
+
+`recipes/syscall.h` provides wrappers for common endpoints. For example,
+`lucid_get_ticks()` returns the tick count, `lucid_sleep(18)` waits 18 ticks,
+and `lucid_fs_is_directory()` returns `1` for a directory, `0` for a file, or
+`-1` on error. To wait for a file change, `lucid_fs_watch(path)` blocks until
+that existing mutable file is written or unlinked, then returns `1`:
+
+```c
+#include "recipes/syscall.h"
+
+uint32_t ticks = lucid_get_ticks();
+uint32_t waited = lucid_sleep(18);
+int is_directory = lucid_fs_is_directory("/system");
+uint32_t changed = lucid_fs_watch("/tmp/syscall-example");
+```
+
+For code using POSIX-style descriptors, the libc handles the endpoint
+marshalling and converts negative kernel errno results to `-1` and `errno`:
+
+```c
+#include <fcntl.h>
+#include <unistd.h>
+
+char version[32];
+int fd = open("/system/info/version", O_RDONLY);
+if (fd >= 0) {
+    ssize_t length = read(fd, version, sizeof(version));
+    if (length >= 0) {
+        /* Use version[0..length); read does not append a NUL byte. */
+    }
+    (void)close(fd);
+}
+```
+
+## Clearsh examples
+
+Clearsh's `read` and `write` functions use the same filesystem calls. A
+Clearsh session can read a virtual file, create/read a regular file, or use
+the checked syscall form directly:
+
+```lisp
+(print (read (file /system/info/version)))
+(write (file /tmp/note) (text "saved from Clearsh\n"))
+(print (read (file /tmp/note)))
+(print (syscall 3 (file /system/syscalls/get_ticks)))
+(syscall 4 (file /tmp/note) (text "updated through syscall 4\n"))
+```
+
+In `(syscall number ...)`, syscall `3` takes one `(file ...)` argument and
+returns its contents as text. Syscall `4` takes a `(file ...)` and a `(text
+...)` value and returns the number of bytes written. Only these two syscall
+numbers are accepted; the shell does not expose raw pointers or register
+arguments. System operations such as sleeping are used by reading their
+virtual endpoint, for example:
+
+```lisp
+(print (read (file /system/time/sleep/18)))
+```
+
 All other kernel operations are exposed as virtual files. This removes their
 individual syscall numbers, not the kernel functionality behind the files.
 The paths below are virtual endpoints and are not regular RAMFS files.
