@@ -4,8 +4,57 @@
 #include <unistd.h>
 
 #include "recipes/syscall.h"
+#include "internal.h"
 
 int errno;
+
+static uint32_t syscall_transport(uint32_t number,
+                                 uint32_t arg1,
+                                 uint32_t arg2,
+                                 uint32_t arg3,
+                                 uint32_t arg4)
+{
+#ifdef LUCID_USER_SYSCALL_TEST
+    return lucid_libc_test_transport(number, arg1, arg2, arg3, arg4);
+#else
+    uint32_t result;
+    __asm__ volatile (
+        "int $0x80"
+        : "=a"(result)
+        : "0"(number), "b"(arg1), "c"(arg2), "d"(arg3), "S"(arg4)
+        : "memory"
+    );
+    return result;
+#endif
+}
+
+uint32_t lucid_fs_read(const char *path, void *buffer, uint32_t capacity)
+{
+    uint32_t path_length = 0;
+    while (path[path_length]) path_length++;
+    return syscall_transport(
+        SYS_FS_READ,
+        (uint32_t)(uintptr_t)path,
+        path_length,
+        (uint32_t)(uintptr_t)buffer,
+        capacity
+    );
+}
+
+uint32_t lucid_fs_write(const char *path,
+                        const void *data,
+                        uint32_t length)
+{
+    uint32_t path_length = 0;
+    while (path[path_length]) path_length++;
+    return syscall_transport(
+        SYS_FS_WRITE,
+        (uint32_t)(uintptr_t)path,
+        path_length,
+        (uint32_t)(uintptr_t)data,
+        length
+    );
+}
 
 static int normalize_path(const char *path,
                           char normalized[SYS_PATH_MAX],

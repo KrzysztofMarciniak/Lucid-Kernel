@@ -1,42 +1,13 @@
 #ifndef LUCID_RECIPE_SYSCALL_FILES_H
 #define LUCID_RECIPE_SYSCALL_FILES_H
 
+#include <lucid.h>
 #include "syscall_abi.h"
 #include "syscall_fs_read.h"
 #include "syscall_fs_write.h"
 #include <stddef.h>
 
 #ifdef LUCID_USER
-static inline uint32_t lucid_fs_read(const char *path,
-                                     void *buffer,
-                                     uint32_t capacity)
-{
-    uint32_t path_length = 0;
-    while (path[path_length]) path_length++;
-    return lucid_user_syscall(
-        SYS_FS_READ,
-        (uint32_t)(uintptr_t)path,
-        path_length,
-        (uint32_t)(uintptr_t)buffer,
-        capacity
-    );
-}
-
-static inline uint32_t lucid_fs_write(const char *path,
-                                      const void *data,
-                                      uint32_t length)
-{
-    uint32_t path_length = 0;
-    while (path[path_length]) path_length++;
-    return lucid_user_syscall(
-        SYS_FS_WRITE,
-        (uint32_t)(uintptr_t)path,
-        path_length,
-        (uint32_t)(uintptr_t)data,
-        length
-    );
-}
-
 static inline int lucid_parse_u32(const char *text,
                                   uint32_t length,
                                   uint32_t *value)

@@ -159,11 +159,9 @@ static void test_file_watch(void)
 
     int fd = open(path, O_RDWR | O_CREAT | O_TRUNC, 0600);
     if (fd < 0 ||
-        lucid_user_syscall(
-            SYS_FS_WRITE,
-            (uint32_t)"/system/files/watch",
-            sizeof("/system/files/watch") - 1,
-            0xFFFFFFFFu,
+        lucid_fs_write(
+            "/system/files/watch",
+            (const void *)(uintptr_t)0xFFFFFFFFu,
             sizeof(path) - 1
         ) != SYS_UNKNOWN_TEST ||
         lucid_fs_watch(missing_path) != SYS_UNKNOWN_TEST) {
@@ -259,13 +257,7 @@ static void test_syscall_modules(void)
     char buffer[256];
     char terminal_contents[SYS_FILE_MAX];
     char configured_path[SYS_PATH_MAX];
-    uint32_t result = lucid_user_syscall(
-        SYS_FS_READ,
-        (uint32_t)zoom_path,
-        sizeof(zoom_path) - 1,
-        (uint32_t)buffer,
-        sizeof(buffer)
-    );
+    uint32_t result = lucid_fs_read(zoom_path, buffer, sizeof(buffer));
     if (result != 2 || buffer[0] != '1' || buffer[1] != '\n') {
         for (;;) { }
     }
@@ -293,15 +285,8 @@ static void test_syscall_modules(void)
     }
     for (uint32_t i = 0;
          i < sizeof(policy_paths) / sizeof(policy_paths[0]); i++) {
-        uint32_t path_length = text_length(policy_paths[i]);
         uint32_t expected_length = text_length(policy_defaults[i]);
-        result = lucid_user_syscall(
-            SYS_FS_READ,
-            (uint32_t)policy_paths[i],
-            path_length,
-            (uint32_t)buffer,
-            sizeof(buffer)
-        );
+        result = lucid_fs_read(policy_paths[i], buffer, sizeof(buffer));
         if (result != expected_length) {
             for (;;) { }
         }
@@ -312,35 +297,19 @@ static void test_syscall_modules(void)
         }
     }
 
-    result = lucid_user_syscall(
-        SYS_FS_READ,
-        (uint32_t)zoom_path,
-        sizeof(zoom_path) - 1,
-        0xFFFFFFFFu,
-        1
+    result = lucid_fs_read(
+        zoom_path, (void *)(uintptr_t)0xFFFFFFFFu, 1
     );
     if (result != SYS_UNKNOWN_TEST) {
         for (;;) { }
     }
 
-    result = lucid_user_syscall(
-        SYS_FS_READ,
-        (uint32_t)syscall_dir,
-        sizeof(syscall_dir) - 1,
-        (uint32_t)buffer,
-        sizeof(buffer)
-    );
+    result = lucid_fs_read(syscall_dir, buffer, sizeof(buffer));
     if (result == 0 || result == SYS_UNKNOWN_TEST) {
         for (;;) { }
     }
 
-    result = lucid_user_syscall(
-        SYS_FS_READ,
-        (uint32_t)terminal_dir,
-        sizeof(terminal_dir) - 1,
-        (uint32_t)buffer,
-        sizeof(buffer)
-    );
+    result = lucid_fs_read(terminal_dir, buffer, sizeof(buffer));
     if (result != sizeof(terminal_dir_listing) - 1) {
         for (;;) { }
     }
@@ -350,23 +319,15 @@ static void test_syscall_modules(void)
         }
     }
 
-    result = lucid_user_syscall(
-        SYS_FS_WRITE,
-        (uint32_t)terminal_path,
-        sizeof(terminal_path) - 1,
-        (uint32_t)terminal_message,
-        sizeof(terminal_message) - 1
+    result = lucid_fs_write(
+        terminal_path, terminal_message, sizeof(terminal_message) - 1
     );
     if (result != sizeof(terminal_message) - 1) {
         for (;;) { }
     }
 
-    result = lucid_user_syscall(
-        SYS_FS_READ,
-        (uint32_t)terminal_path,
-        sizeof(terminal_path) - 1,
-        (uint32_t)terminal_contents,
-        sizeof(terminal_contents)
+    result = lucid_fs_read(
+        terminal_path, terminal_contents, sizeof(terminal_contents)
     );
     if (result != sizeof(terminal_message) - 1) {
         for (;;) { }
@@ -377,34 +338,18 @@ static void test_syscall_modules(void)
         }
     }
 
-    result = lucid_user_syscall(
-        SYS_FS_WRITE,
-        (uint32_t)terminal_path,
-        sizeof(terminal_path) - 1,
-        (uint32_t)empty_text,
-        0
-    );
+    result = lucid_fs_write(terminal_path, empty_text, 0);
     if (result != 0) {
         for (;;) { }
     }
-    result = lucid_user_syscall(
-        SYS_FS_READ,
-        (uint32_t)terminal_path,
-        sizeof(terminal_path) - 1,
-        (uint32_t)terminal_contents,
-        sizeof(terminal_contents)
+    result = lucid_fs_read(
+        terminal_path, terminal_contents, sizeof(terminal_contents)
     );
     if (result != 0) {
         for (;;) { }
     }
 
-    result = lucid_user_syscall(
-        SYS_FS_READ,
-        (uint32_t)process_dir,
-        sizeof(process_dir) - 1,
-        (uint32_t)buffer,
-        sizeof(buffer)
-    );
+    result = lucid_fs_read(process_dir, buffer, sizeof(buffer));
     if (result != sizeof(process_dir_listing) - 1) {
         for (;;) { }
     }
@@ -414,25 +359,13 @@ static void test_syscall_modules(void)
         }
     }
 
-    result = lucid_user_syscall(
-        SYS_FS_READ,
-        (uint32_t)process_list,
-        sizeof(process_list) - 1,
-        (uint32_t)buffer,
-        sizeof(buffer)
-    );
+    result = lucid_fs_read(process_list, buffer, sizeof(buffer));
     if (result == 0 || result == SYS_UNKNOWN_TEST ||
         buffer[0] != 'P' || buffer[1] != 'I' || buffer[2] != 'D') {
         for (;;) { }
     }
 
-    result = lucid_user_syscall(
-        SYS_FS_READ,
-        (uint32_t)process_kill,
-        sizeof(process_kill) - 1,
-        (uint32_t)buffer,
-        sizeof(buffer)
-    );
+    result = lucid_fs_read(process_kill, buffer, sizeof(buffer));
     if (result != SYS_UNKNOWN_TEST) {
         for (;;) { }
     }
@@ -442,13 +375,7 @@ static void test_syscall_modules(void)
         for (;;) { }
     }
 
-    result = lucid_user_syscall(
-        SYS_FS_WRITE,
-        (uint32_t)process_kill,
-        sizeof(process_kill) - 1,
-        (uint32_t)self_image,
-        sizeof(self_image) - 1
-    );
+    result = lucid_fs_write(process_kill, self_image, sizeof(self_image) - 1);
     if (result != SYS_UNKNOWN_TEST) {
         for (;;) { }
     }
@@ -462,13 +389,7 @@ static void test_syscall_modules(void)
     if (child_pid == SYS_UNKNOWN_TEST) {
         for (;;) { }
     }
-    result = lucid_user_syscall(
-        SYS_FS_WRITE,
-        (uint32_t)process_kill,
-        sizeof(process_kill) - 1,
-        (uint32_t)self_image,
-        sizeof(self_image) - 1
-    );
+    result = lucid_fs_write(process_kill, self_image, sizeof(self_image) - 1);
     if (result != sizeof(self_image) - 1) {
         for (;;) { }
     }

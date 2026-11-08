@@ -41,17 +41,8 @@ static inline int lucid_read_config_path(const char *config_path,
                                          char path[SYS_PATH_MAX],
                                          uint32_t *path_length)
 {
-    uint32_t config_path_length = 0;
-    while (config_path[config_path_length]) config_path_length++;
-
     char config[SYS_PATH_MAX + 2];
-    uint32_t length = lucid_user_syscall(
-        SYS_FS_READ,
-        (uint32_t)(uintptr_t)config_path,
-        config_path_length,
-        (uint32_t)(uintptr_t)config,
-        sizeof(config)
-    );
+    uint32_t length = lucid_fs_read(config_path, config, sizeof(config));
     if (length == SYS_UNKNOWN_TEST || length >= sizeof(config)) return 0;
 
     while (length &&

@@ -347,7 +347,20 @@ for name in $names; do
     done
 }
 
+check_syscall_boundary() {
+    violations="$(grep -R -n -E 'lucid_user_syscall|int[[:space:]]+\$0x80' \
+        "$SCRIPT_DIR/recipes" "$SCRIPT_DIR/userland" "$SCRIPT_DIR/tests" \
+        --include='*.c' --include='*.h' |
+        grep -v "^$SCRIPT_DIR/userland/libc/unistd.c:" || true)"
+    if [ -n "$violations" ]; then
+        echo "ERROR: raw user-mode syscalls must stay inside userland/libc/unistd.c" >&2
+        echo "$violations" >&2
+        exit 1
+    fi
+}
+
 build() {
+    check_syscall_boundary
     mkdir -p "$BUILD_DIR"
     objs=""
 

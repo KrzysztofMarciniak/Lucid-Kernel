@@ -4,6 +4,7 @@
 #include <unistd.h>
 
 #include "recipes/syscall.h"
+#include "userland/libc/internal.h"
 
 static uint32_t mock_result;
 static uint32_t mock_call_count;
@@ -13,11 +14,11 @@ static uint32_t mock_arg2;
 static uint32_t mock_arg3;
 static uint32_t mock_arg4;
 
-uint32_t lucid_user_syscall(uint32_t number,
-                            uint32_t arg1,
-                            uint32_t arg2,
-                            uint32_t arg3,
-                            uint32_t arg4)
+uint32_t lucid_libc_test_transport(uint32_t number,
+                                   uint32_t arg1,
+                                   uint32_t arg2,
+                                   uint32_t arg3,
+                                   uint32_t arg4)
 {
     mock_call_count++;
     mock_number = number;
@@ -122,6 +123,27 @@ int main(void)
     CHECK(mock_call_count == calls_before);
     CHECK(getcwd(cwd, 1) == 0);
     CHECK(errno == ERANGE);
+
+    static const char virtual_path[] = "/system/info/version";
+    char file_buffer[8];
+    mock_result = 3;
+    CHECK(lucid_fs_read(virtual_path, file_buffer, sizeof(file_buffer)) == 3);
+    CHECK(mock_number == SYS_FS_READ);
+    CHECK(mock_arg1 == (uint32_t)(uintptr_t)virtual_path);
+    CHECK(mock_arg2 == sizeof(virtual_path) - 1);
+    CHECK(mock_arg3 == (uint32_t)(uintptr_t)file_buffer);
+    CHECK(mock_arg4 == sizeof(file_buffer));
+
+    static const char file_contents[] = "test";
+    mock_result = sizeof(file_contents) - 1;
+    CHECK(lucid_fs_write(
+              virtual_path, file_contents, sizeof(file_contents) - 1
+          ) == sizeof(file_contents) - 1);
+    CHECK(mock_number == SYS_FS_WRITE);
+    CHECK(mock_arg1 == (uint32_t)(uintptr_t)virtual_path);
+    CHECK(mock_arg2 == sizeof(virtual_path) - 1);
+    CHECK(mock_arg3 == (uint32_t)(uintptr_t)file_contents);
+    CHECK(mock_arg4 == sizeof(file_contents) - 1);
 
     return 0;
 }

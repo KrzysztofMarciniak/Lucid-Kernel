@@ -77,10 +77,13 @@ unsupported.
 
 ## Userland and extension
 
-`recipes/syscall.h` provides `lucid_fs_read()` and `lucid_fs_write()` wrappers
-through `recipes/syscall_files.h`, along with helpers for common virtual-file
-operations. Clearsh's `(read ...)` and `(write ...)` use the filesystem calls.
-The checked `(syscall number ...)` form accepts only syscall numbers 3 and 4.
+The small user-mode libc exposes `lucid_fs_read()` and `lucid_fs_write()` in
+`<lucid.h>`, plus POSIX-style `open`, `read`, `write`, `close`, and related
+functions from `<fcntl.h>` and `<unistd.h>`. These calls communicate with the
+kernel through virtual-file endpoints; the raw `int 0x80` transport is confined
+to the libc. `recipes/syscall.h` adds helpers for common system endpoints.
+Clearsh's `(read ...)` and `(write ...)` use the filesystem calls. The checked
+`(syscall number ...)` form accepts only syscall numbers 3 and 4.
 
 Window-manager events `0x300`–`0x302` are delivered through key input; they are
 not numbered syscalls.

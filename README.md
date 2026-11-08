@@ -164,13 +164,13 @@ does not expose raw kernel pointers. Other operations use virtual file
 endpoints such as `/system/syscalls/get_ticks` and
 `/system/processes/current/fork`.
 
-A ring-3 C program uses the wrappers in `recipes/syscall.h`. This example
-writes a regular file through `SYS_FS_WRITE`; the wrapper invokes `int 0x80`
-with the syscall number in `EAX`, arguments in `EBX`/`ECX`/`EDX`/`ESI`, and
-reads the result from `EAX`.
+A ring-3 C program uses Lucid's small libc for file I/O and
+`recipes/syscall.h` for helpers such as process control. The raw `int 0x80`
+transport is internal to the libc:
 
 ```c
 #define LUCID_USER
+#include <lucid.h>
 #include "recipes/syscall.h"
 
 __attribute__((section(".entry")))
