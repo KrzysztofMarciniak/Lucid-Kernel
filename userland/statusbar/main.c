@@ -159,9 +159,9 @@ static void write_error(const char *output, const char *message)
     write_output(output, text);
 }
 
-static void sleep_ticks(uint32_t ticks)
+static void wait_ticks(uint32_t ticks)
 {
-    (void)clearsh_syscall(SYS_SLEEP, ticks, 0, 0, 0);
+    (void)lucid_wait_ticks(ticks);
 }
 
 __attribute__((section(".entry")))
@@ -175,14 +175,14 @@ void statusbar_user_entry(void)
     for (;;) {
         if (!load_config(&config)) {
             write_error(DEFAULT_OUTPUT_PATH, "invalid statusbar config");
-            sleep_ticks(CONFIG_POLL_TICKS);
+            wait_ticks(CONFIG_POLL_TICKS);
             have_previous = 0;
             continue;
         }
 
         if (!config.enabled) {
             write_output(config.output, "");
-            sleep_ticks(CONFIG_POLL_TICKS);
+            wait_ticks(CONFIG_POLL_TICKS);
             have_previous = 0;
             continue;
         }
@@ -190,24 +190,24 @@ void statusbar_user_entry(void)
         if (!have_previous || !same_config(&config, &previous)) {
             previous = config;
             have_previous = 1;
-            next_run = clearsh_syscall(SYS_GETTICKS, 0, 0, 0, 0);
+            next_run = lucid_get_ticks();
         }
 
-        uint32_t now = clearsh_syscall(SYS_GETTICKS, 0, 0, 0, 0);
+        uint32_t now = lucid_get_ticks();
         if ((int32_t)(now - next_run) >= 0) {
             value result = clearsh_run_statusbar_script(config.script);
             if (result.type == VALUE_ERROR) {
                 write_error(config.output, result.data.text);
             }
-            now = clearsh_syscall(SYS_GETTICKS, 0, 0, 0, 0);
+            now = lucid_get_ticks();
             next_run = now + config.interval_ticks;
         }
 
-        now = clearsh_syscall(SYS_GETTICKS, 0, 0, 0, 0);
+        now = lucid_get_ticks();
         uint32_t remaining = next_run - now;
         if ((int32_t)remaining <= 0 || remaining > CONFIG_POLL_TICKS) {
             remaining = CONFIG_POLL_TICKS;
         }
-        sleep_ticks(remaining);
+        wait_ticks(remaining);
     }
 }

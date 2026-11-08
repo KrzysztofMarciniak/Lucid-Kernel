@@ -15,7 +15,7 @@ static int32_t posix_write_file(syscall_frame *frame, uint32_t slot)
             return syscall_posix_error(EBADF);
         }
         if (fd == 0) return syscall_posix_error(EBADF);
-        if (count > SYS_WRITE_MAX) count = SYS_WRITE_MAX;
+        if (count > SYS_FILE_MAX) count = SYS_FILE_MAX;
         if (count == 0) return 0;
         if (!syscall_user_range_valid(frame->ecx, count, 0)) {
             return syscall_posix_error(EFAULT);
@@ -80,14 +80,10 @@ static int32_t posix_write_file(syscall_frame *frame, uint32_t slot)
     return (int32_t)count;
 }
 
-static uint32_t syscall_posix_write_handle(syscall_frame *frame)
+uint32_t syscall_posix_write_handle(syscall_frame *frame)
 {
     frame->eax = (uint32_t)posix_write_file(
         frame, syscall_posix_current_slot()
     );
     return 0;
 }
-
-SYSCALL_HANDLER(syscall_posix_write_entry,
-                SYSCALL_POSIX_WRITE,
-                syscall_posix_write_handle);

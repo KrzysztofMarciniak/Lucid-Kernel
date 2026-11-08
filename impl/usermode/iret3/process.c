@@ -4,6 +4,7 @@
 #include "recipes/syscall.h"
 #include "impl/syscall/posix/posix_internal.h"
 #include "recipes/terminal.h"
+#include "recipes/timer.h"
 #include "recipes/usermode.h"
 #include "recipes/vmm.h"
 #include "userland_image.h"
@@ -22,6 +23,13 @@ typedef enum {
     PROCESS_EXITED
 } process_state;
 
+typedef enum {
+    PROCESS_WAIT_NONE,
+    PROCESS_WAIT_CHILD,
+    PROCESS_WAIT_FILE,
+    PROCESS_WAIT_TICKS
+} process_wait_kind;
+
 typedef struct process process;
 
 struct process {
@@ -29,6 +37,11 @@ struct process {
     uint32_t pid;
     uint32_t exit_status;
     uint32_t wait_pid;
+    uint32_t wait_tick_start;
+    uint32_t wait_tick_count;
+    int wait_returns_zero;
+    process_wait_kind wait_kind;
+    char wait_file_path[SYS_PATH_MAX];
     process_state state;
     int waiting_input;
     int reap_on_switch;
@@ -120,6 +133,11 @@ uint32_t usermode_process_fork(usermode_frame *frame)
     }
     child->exit_status = 0;
     child->wait_pid = 0;
+    child->wait_tick_start = 0;
+    child->wait_tick_count = 0;
+    child->wait_returns_zero = 0;
+    child->wait_kind = PROCESS_WAIT_NONE;
+    child->wait_file_path[0] = '\0';
     child->state = PROCESS_READY;
     child->waiting_input = 0;
     child->reap_on_switch = 0;
@@ -164,6 +182,11 @@ static void release_process(process *entry)
     entry->space = 0;
     entry->saved_stack = 0;
     entry->wait_pid = 0;
+    entry->wait_tick_start = 0;
+    entry->wait_tick_count = 0;
+    entry->wait_returns_zero = 0;
+    entry->wait_kind = PROCESS_WAIT_NONE;
+    entry->wait_file_path[0] = '\0';
     entry->waiting_input = 0;
     entry->reap_on_switch = 0;
     entry->is_window = 0;
@@ -233,6 +256,9 @@ int usermode_process_wait(uint32_t pid, usermode_frame *frame)
 
         parent->state = PROCESS_WAITING;
         parent->wait_pid = pid;
+        parent->wait_tick_count = 0;
+        parent->wait_returns_zero = 0;
+        parent->wait_kind = PROCESS_WAIT_CHILD;
         parent->saved_stack = (uint32_t *)frame;
         return 1;
     }
@@ -240,11 +266,97 @@ int usermode_process_wait(uint32_t pid, usermode_frame *frame)
     return 0;
 }
 
+int usermode_process_wait_ticks(uint32_t ticks,
+                                int return_zero,
+                                usermode_frame *frame)
+{
+    process *entry = current();
+    if (ticks == 0) {
+        frame->eax = return_zero ? 0 : timer_get_ticks();
+        return 0;
+    }
+
+    entry->wait_tick_start = timer_get_ticks();
+    entry->wait_tick_count = ticks;
+    entry->wait_returns_zero = return_zero;
+    entry->wait_pid = 0;
+    entry->wait_kind = PROCESS_WAIT_TICKS;
+    entry->state = PROCESS_WAITING;
+    entry->saved_stack = (uint32_t *)frame;
+    return 1;
+}
+
 static process *process_at_slot(uint32_t slot)
 {
     if (slot == 0) return &root_process;
     if (slot > PROCESS_LIMIT) return 0;
     return &process_table[slot - 1];
+}
+
+static int process_path_equals(const char *left, const char *right)
+{
+    while (*left && *left == *right) {
+        left++;
+        right++;
+    }
+    return *left == *right;
+}
+
+void usermode_process_tick(uint32_t ticks)
+{
+    for (uint32_t slot = 0; slot <= PROCESS_LIMIT; slot++) {
+        process *entry = process_at_slot(slot);
+        if (!entry || !entry->in_use || entry->state != PROCESS_WAITING ||
+            entry->wait_kind != PROCESS_WAIT_TICKS ||
+            (uint32_t)(ticks - entry->wait_tick_start) <
+                entry->wait_tick_count) {
+            continue;
+        }
+
+        usermode_frame *frame = (usermode_frame *)entry->saved_stack;
+        frame->eax = entry->wait_returns_zero ? 0 : ticks;
+        entry->wait_tick_count = 0;
+        entry->wait_returns_zero = 0;
+        entry->wait_kind = PROCESS_WAIT_NONE;
+        entry->state = PROCESS_READY;
+    }
+}
+
+void usermode_process_watch_file(const char *path, usermode_frame *frame)
+{
+    process *entry = current();
+    size_t i = 0;
+    while (path[i]) {
+        entry->wait_file_path[i] = path[i];
+        i++;
+    }
+    entry->wait_file_path[i] = '\0';
+    entry->wait_pid = 0;
+    entry->wait_tick_count = 0;
+    entry->wait_returns_zero = 0;
+    entry->wait_kind = PROCESS_WAIT_FILE;
+    entry->state = PROCESS_WAITING;
+    entry->saved_stack = (uint32_t *)frame;
+}
+
+void usermode_process_file_changed(const char *path)
+{
+    for (uint32_t slot = 0; slot <= PROCESS_LIMIT; slot++) {
+        process *entry = process_at_slot(slot);
+        if (!entry || !entry->in_use || entry->state != PROCESS_WAITING ||
+            entry->wait_kind != PROCESS_WAIT_FILE ||
+            !process_path_equals(entry->wait_file_path, path)) {
+            continue;
+        }
+
+        usermode_frame *frame = (usermode_frame *)entry->saved_stack;
+        frame->eax = 1;
+        entry->wait_tick_count = 0;
+        entry->wait_returns_zero = 0;
+        entry->wait_kind = PROCESS_WAIT_NONE;
+        entry->wait_file_path[0] = '\0';
+        entry->state = PROCESS_READY;
+    }
 }
 
 int usermode_process_window_active(uint32_t slot)
@@ -282,6 +394,9 @@ void usermode_process_close_window(uint32_t slot)
     if (!usermode_process_window_active(slot)) return;
     entry->state = PROCESS_EXITED;
     entry->exit_status = 0;
+    entry->wait_tick_count = 0;
+    entry->wait_kind = PROCESS_WAIT_NONE;
+    entry->wait_file_path[0] = '\0';
     window_manager_process_exited(slot);
 }
 
@@ -318,6 +433,11 @@ uint32_t *usermode_process_schedule(usermode_frame *frame)
     }
 
     process *next = next_runnable(previous);
+    while (!next && previous->state == PROCESS_WAITING &&
+           (frame->cs & 3u) == 3u) {
+        __asm__ volatile ("sti; hlt" ::: "memory");
+        next = next_runnable(previous);
+    }
     if (!next) return 0;
     next->state = PROCESS_RUNNING;
     current_process = next;
@@ -487,13 +607,19 @@ static int process_mark_exited(process *exiting, uint32_t status)
     if (exiting->is_window) {
         window_manager_process_exited(slot);
     }
+    exiting->wait_kind = PROCESS_WAIT_NONE;
+    exiting->wait_tick_count = 0;
+    exiting->wait_returns_zero = 0;
+    exiting->wait_file_path[0] = '\0';
     if (exiting->parent &&
         exiting->parent->state == PROCESS_WAITING &&
+        exiting->parent->wait_kind == PROCESS_WAIT_CHILD &&
         exiting->parent->wait_pid == exiting->pid) {
         usermode_frame *waiting_frame =
             (usermode_frame *)exiting->parent->saved_stack;
         waiting_frame->eax = exiting->pid;
         exiting->parent->wait_pid = 0;
+        exiting->parent->wait_kind = PROCESS_WAIT_NONE;
         exiting->parent->state = PROCESS_READY;
         exiting->reap_on_switch = 1;
         return 1;
@@ -504,7 +630,13 @@ static int process_mark_exited(process *exiting, uint32_t status)
 
 void usermode_process_exit(uint32_t status)
 {
-    process_mark_exited(current(), status);
+    process *exiting = current();
+#ifdef LUCID_TEST_MODE
+    if (exiting == &root_process && status == 0) {
+        __asm__ volatile ("outl %0, $0xF4" : : "a"(0x10u));
+    }
+#endif
+    process_mark_exited(exiting, status);
 }
 
 int usermode_process_kill(const char *name)

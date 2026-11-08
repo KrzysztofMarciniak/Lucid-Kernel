@@ -24,14 +24,10 @@ static int32_t posix_close_file(uint32_t fd, uint32_t slot)
     return 0;
 }
 
-static uint32_t syscall_posix_close_handle(syscall_frame *frame)
+uint32_t syscall_posix_close_handle(syscall_frame *frame)
 {
     frame->eax = (uint32_t)posix_close_file(
         frame->ebx, syscall_posix_current_slot()
     );
     return 0;
 }
-
-SYSCALL_HANDLER(syscall_posix_close_entry,
-                SYSCALL_POSIX_CLOSE,
-                syscall_posix_close_handle);

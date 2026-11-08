@@ -22,6 +22,7 @@ typedef struct {
     int command_history_draft_valid;
     uint16_t input_open_positions[SYS_LINE_MAX];
     sys_readline_completion readline_completion;
+    int readline_completion_enabled;
 } readline_state;
 
 static readline_state readline_states[USERMODE_PROCESS_SLOTS];
@@ -604,6 +605,64 @@ char *syscall_filesystem_buffer(void)
     return filesystem_buffer;
 }
 
+static int readline_completion_valid(void)
+{
+    size_t directory_length;
+    size_t prompt_length;
+    if (readline_completion.function_names_length >=
+            sizeof(readline_completion.function_names) ||
+        readline_completion.current_directory[0] != '/' ||
+        !bounded_string_length(
+            readline_completion.current_directory,
+            sizeof(readline_completion.current_directory),
+            &directory_length
+        ) ||
+        !bounded_string_length(
+            readline_completion.prompt,
+            sizeof(readline_completion.prompt),
+            &prompt_length
+        ) ||
+        (readline_completion.function_names_length &&
+         readline_completion.function_names[
+             readline_completion.function_names_length - 1
+         ] != '\n') ||
+        readline_completion.function_names[
+            readline_completion.function_names_length
+        ] != '\0') {
+        return 0;
+    }
+    for (size_t i = 0;
+         i < readline_completion.function_names_length;
+         i++) {
+        uint8_t candidate =
+            (uint8_t)readline_completion.function_names[i];
+        if (candidate == '\0' ||
+            (candidate < 32 && candidate != '\n')) {
+            return 0;
+        }
+    }
+    (void)directory_length;
+    (void)prompt_length;
+    return 1;
+}
+
+int syscall_readline_set_completion(const char *data, size_t length)
+{
+    if (length == 0) {
+        READLINE_STATE.readline_completion_enabled = 0;
+        return 1;
+    }
+    if (length != sizeof(readline_completion)) return 0;
+    const uint8_t *source = (const uint8_t *)data;
+    uint8_t *destination = (uint8_t *)&readline_completion;
+    for (size_t i = 0; i < sizeof(readline_completion); i++) {
+        destination[i] = source[i];
+    }
+    if (!readline_completion_valid()) return 0;
+    READLINE_STATE.readline_completion_enabled = 1;
+    return 1;
+}
+
 
 uint32_t syscall_readline_handle(syscall_frame *frame)
 {
@@ -613,10 +672,8 @@ uint32_t syscall_readline_handle(syscall_frame *frame)
         return 0;
     }
 
-    int completion_enabled = 0;
+    int completion_enabled = READLINE_STATE.readline_completion_enabled;
     if (frame->edx || frame->esi) {
-        size_t directory_length;
-        size_t prompt_length;
         if (!frame->edx || frame->esi != sizeof(readline_completion) ||
             !syscall_user_range_valid(frame->edx, frame->esi, 0)) {
             frame->eax = SYS_UNKNOWN_TEST;
@@ -627,42 +684,11 @@ uint32_t syscall_readline_handle(syscall_frame *frame)
         for (size_t i = 0; i < sizeof(readline_completion); i++) {
             destination[i] = source[i];
         }
-        if (readline_completion.function_names_length >=
-                sizeof(readline_completion.function_names) ||
-            readline_completion.current_directory[0] != '/' ||
-            !bounded_string_length(
-                readline_completion.current_directory,
-                sizeof(readline_completion.current_directory),
-                &directory_length
-            ) ||
-            !bounded_string_length(
-                readline_completion.prompt,
-                sizeof(readline_completion.prompt),
-                &prompt_length
-            ) ||
-            (readline_completion.function_names_length &&
-             readline_completion.function_names[
-                 readline_completion.function_names_length - 1
-             ] != '\n') ||
-            readline_completion.function_names[
-                readline_completion.function_names_length
-            ] != '\0') {
+        if (!readline_completion_valid()) {
             frame->eax = SYS_UNKNOWN_TEST;
             return 0;
         }
-        for (size_t i = 0;
-             i < readline_completion.function_names_length;
-             i++) {
-            uint8_t candidate =
-                (uint8_t)readline_completion.function_names[i];
-            if (candidate == '\0' ||
-                (candidate < 32 && candidate != '\n')) {
-                frame->eax = SYS_UNKNOWN_TEST;
-                return 0;
-            }
-        }
-        (void)directory_length;
-        (void)prompt_length;
+        READLINE_STATE.readline_completion_enabled = 1;
         completion_enabled = 1;
     }
 
@@ -889,6 +915,18 @@ uint32_t syscall_readline_handle(syscall_frame *frame)
             command_history_draft_valid = 0;
         }
     }
+}
+
+uint32_t syscall_readline_file_handle(syscall_frame *frame)
+{
+    syscall_frame readline_frame = *frame;
+    readline_frame.ebx = frame->edx;
+    readline_frame.ecx = frame->esi;
+    readline_frame.edx = 0;
+    readline_frame.esi = 0;
+    syscall_readline_handle(&readline_frame);
+    frame->eax = readline_frame.eax;
+    return 0;
 }
 
 uint32_t syscall_dispatch(syscall_frame *frame)

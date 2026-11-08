@@ -1337,6 +1337,70 @@ void terminal_write(const char *s)
     while (*s) terminal_putc(*s++);
 }
 
+int terminal_screen_read(char *buffer, size_t capacity, size_t *length)
+{
+    if (!buffer || !length) return 0;
+    initialize_surfaces();
+    terminal_surface *surface =
+        &terminal_surfaces[terminal_surface_slot()];
+
+    uint32_t last_row = surface->row;
+    for (uint32_t row = surface->row + 1; row < surface->rows; row++) {
+        for (uint32_t column = 0; column < surface->columns; column++) {
+            if (surface->cells[row][column] != ' ') {
+                last_row = row;
+                break;
+            }
+        }
+    }
+
+    uint32_t first_row = 0;
+    size_t used;
+    for (;;) {
+        used = 0;
+        for (uint32_t row = first_row; row <= last_row; row++) {
+            uint32_t row_length = surface->columns;
+            while (row_length &&
+                   surface->cells[row][row_length - 1] == ' ') {
+                row_length--;
+            }
+            if (row == surface->row) {
+                uint32_t cursor_length = surface->column +
+                    (surface->wrap_pending ? 1u : 0u);
+                if (row_length < cursor_length) {
+                    row_length = cursor_length;
+                }
+            }
+            used += row_length + (row < last_row ? 1u : 0u);
+        }
+        if (used <= capacity || first_row == last_row) break;
+        first_row++;
+    }
+    if (used > capacity) return 0;
+
+    used = 0;
+    for (uint32_t row = first_row; row <= last_row; row++) {
+        uint32_t row_length = surface->columns;
+        while (row_length &&
+               surface->cells[row][row_length - 1] == ' ') {
+            row_length--;
+        }
+        if (row == surface->row) {
+            uint32_t cursor_length = surface->column +
+                (surface->wrap_pending ? 1u : 0u);
+            if (row_length < cursor_length) {
+                row_length = cursor_length;
+            }
+        }
+        for (uint32_t column = 0; column < row_length; column++) {
+            buffer[used++] = surface->cells[row][column];
+        }
+        if (row < last_row) buffer[used++] = '\n';
+    }
+    *length = used;
+    return 1;
+}
+
 void terminal_flush(void)
 {
     terminal_io_flush();

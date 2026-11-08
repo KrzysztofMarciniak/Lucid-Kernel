@@ -181,60 +181,32 @@ static value call_math(function_id id, const value *args, size_t count)
 
 value call_function(function_id id, value *args, size_t count)
 {
+    if (id == FUNCTION_CLEAR) {
+        if (count != 0) return make_error("clear takes no arguments");
+        if (!terminal_file_clear()) {
+            return make_error("terminal could not be cleared");
+        }
+        return make_value(VALUE_NIL);
+    }
+
     if (id == FUNCTION_SYSCALL) {
         int32_t number;
         if (count == 0 || !get_number(&args[0], &number) || number < 0) {
             return make_error("syscall expects a nonnegative syscall number");
         }
 
-        uint32_t result;
         switch ((uint32_t)number) {
-        case SYS_WRITE:
-            if (count != 2 || args[1].type != VALUE_TEXT) {
-                return make_error("syscall 0 expects one text value");
-            }
-            if (clearsh_quiet_output) return make_number(0);
-            result = clearsh_syscall(
-                SYS_WRITE,
-                (uint32_t)args[1].data.text,
-                string_length(args[1].data.text),
-                0,
-                0
-            );
-            if (result == SYS_UNKNOWN_TEST) {
-                return make_error("syscall 0 failed");
-            }
-            return make_number((int32_t)result);
-
-        case SYS_READLINE: {
-            char line[LINE_MAX];
-            if (count != 1) return make_error("syscall 2 takes no arguments");
-            if (clearsh_quiet_output) {
-                return make_error("status scripts cannot read interactive input");
-            }
-            result = clearsh_syscall(
-                SYS_READLINE, (uint32_t)line, sizeof(line), 0, 0
-            );
-            if (result == SYS_UNKNOWN_TEST || result >= sizeof(line)) {
-                return make_error("syscall 2 failed");
-            }
-            value output = make_value(VALUE_TEXT);
-            for (size_t i = 0; i < result; i++) {
-                output.data.text[i] = line[i];
-            }
-            output.data.text[result] = '\0';
-            return output;
-        }
-
         case SYS_FS_READ: {
             char contents[TEXT_MAX];
-            size_t length = 0;
             if (count != 2 || args[1].type != VALUE_FILE) {
-                return make_error("syscall 3 expects one file value");
+                return make_error("read expects one file value");
             }
-            if (ramfs_read(args[1].data.text, contents,
-                           sizeof(contents) - 1, &length)) {
-                return make_error("syscall 3 failed");
+            uint32_t length = lucid_fs_read(
+                args[1].data.text, contents, sizeof(contents) - 1
+            );
+            if (length == SYS_UNKNOWN_TEST ||
+                length >= sizeof(contents)) {
+                return make_error("file read failed");
             }
             contents[length] = '\0';
             value output = make_value(VALUE_TEXT);
@@ -246,99 +218,28 @@ value call_function(function_id id, value *args, size_t count)
         case SYS_FS_WRITE:
             if (count != 3 || args[1].type != VALUE_FILE ||
                 args[2].type != VALUE_TEXT) {
-                return make_error("syscall 4 expects a file and text value");
+                return make_error("write expects a file and text value");
             }
-            if (ramfs_write(args[1].data.text, args[2].data.text,
-                            string_length(args[2].data.text))) {
-                return make_error("syscall 4 failed");
+            {
+                uint32_t length = (uint32_t)string_length(
+                    args[2].data.text
+                );
+                if (lucid_fs_write(
+                        args[1].data.text, args[2].data.text, length
+                    ) == SYS_UNKNOWN_TEST) {
+                    return make_error("file write failed");
+                }
+                return make_number((int32_t)length);
             }
-            return make_number((int32_t)string_length(args[2].data.text));
-
-        case SYS_FS_LIST: {
-            char entries[TEXT_MAX];
-            size_t length = 0;
-            if (count != 2 || args[1].type != VALUE_FILE) {
-                return make_error("syscall 5 expects one directory value");
-            }
-            if (ramfs_list(args[1].data.text, entries,
-                           sizeof(entries) - 1, &length)) {
-                return make_error("syscall 5 failed");
-            }
-            entries[length] = '\0';
-            value output = make_value(VALUE_TEXT);
-            string_copy(output.data.text, entries,
-                        sizeof(output.data.text));
-            return output;
-        }
-
-        case SYS_FS_STAT:
-            if (count != 2 || args[1].type != VALUE_FILE) {
-                return make_error("syscall 15 expects one file value");
-            }
-            result = (uint32_t)ramfs_is_directory(args[1].data.text);
-            if (result == SYS_UNKNOWN_TEST) {
-                return make_error("syscall 15 failed");
-            }
-            return make_number((int32_t)result);
-
-        case SYS_READKEY:
-            if (count != 1) return make_error("syscall 6 takes no arguments");
-            if (clearsh_quiet_output) {
-                return make_error("status scripts cannot read interactive input");
-            }
-            return make_number((int32_t)clearsh_syscall(
-                SYS_READKEY, 0, 0, 0, 0
-            ));
-
-        case SYS_CLEAR:
-            if (count != 1) return make_error("syscall 7 takes no arguments");
-            if (clearsh_quiet_output) return make_number(0);
-            return make_number((int32_t)clearsh_syscall(
-                SYS_CLEAR, 0, 0, 0, 0
-            ));
-
-        case SYS_SHUTDOWN:
-            if (count != 1) return make_error("syscall 8 takes no arguments");
-            clearsh_syscall(SYS_SHUTDOWN, 0, 0, 0, 0);
-            return make_error("shutdown request returned unexpectedly");
-
-        case SYS_GETTICKS:
-            if (count != 1) return make_error("syscall 9 takes no arguments");
-            result = clearsh_syscall(SYS_GETTICKS, 0, 0, 0, 0);
-            if (result > 2147483647u) {
-                return make_error("syscall result exceeds integer range");
-            }
-            return make_number((int32_t)result);
-
-        case SYS_GET_TERMINAL_SIZE:
-            if (count != 1) {
-                return make_error("syscall 14 takes no arguments");
-            }
-            return make_number((int32_t)clearsh_syscall(
-                SYS_GET_TERMINAL_SIZE, 0, 0, 0, 0
-            ));
-
-        case SYS_SLEEP:
-            if (count != 2 || !get_number(&args[1], &number) || number < 0) {
-                return make_error("syscall 16 expects a nonnegative tick count");
-            }
-            result = clearsh_syscall(SYS_SLEEP, (uint32_t)number, 0, 0, 0);
-            if (result == SYS_UNKNOWN_TEST) {
-                return make_error("syscall 16 failed");
-            }
-            return make_number((int32_t)result);
-
-        case SYS_EXIT:
-            return make_error("syscall 1 is unavailable while Clearsh is running");
 
         default:
-            return make_error("unsupported syscall number");
+            return make_error("only filesystem read and write are syscalls");
         }
     }
 
     if (id == FUNCTION_UPTIME) {
         if (count != 0) return make_error("uptime takes no arguments");
-        uint32_t ticks = clearsh_syscall(SYS_GETTICKS, 0, 0, 0, 0);
+        uint32_t ticks = lucid_get_ticks();
         return make_number((int32_t)(ticks / 100));
     }
 
@@ -489,6 +390,7 @@ value call_function(function_id id, value *args, size_t count)
         if (count != 0) return make_error("help takes no arguments");
         terminal_write("Clearsh: one Lisp expression per line: (function argument ...)\n");
         terminal_write("Files: (read (file path)), (write (file path) (text value))\n");
+        terminal_write("Terminal: /system/terminals/current; (clear) writes empty text\n");
         terminal_write("Dirs: (ls), (ls (file /path)), (cd (file /path)), (pwd)\n");
         terminal_write("Try: (print (read (file /system/info/name)))\n");
         terminal_write("Text: text concat length print; run: (run (file /users/root/start.csh))\n");
@@ -497,11 +399,11 @@ value call_function(function_id id, value *args, size_t count)
         terminal_write("Lists: list map filter; functions: (lambda (x) expr) or (λ ...)\n");
         terminal_write("Editor: (vi (file path)); i/a/o/O, h/j/k/l or arrows, x, u, :w/:q\n");
         terminal_write("System info: list /system/info for boot, features, memory, storage\n");
-        terminal_write("Syscalls: (syscall 9) gets ticks; (syscall 0 (text \"hello\")) writes text\n");
-        terminal_write("Use (syscall 3 (file /path)) to read; see /system/info/syscalls\n");
-        terminal_write("Syscall arguments are typed; raw user pointers and syscall 1 are blocked.\n");
+        terminal_write("Syscalls: numbers 3/4 read and write files; other operations use virtual files\n");
+        terminal_write("See /system/info/syscalls and /SYSTEM.TXT for file endpoints\n");
+        terminal_write("Syscall arguments are typed; raw user pointers are blocked.\n");
         terminal_write("(exit [status]) exits Clearsh; Pioneer restarts it.\n");
-        terminal_write("File and console I/O use syscalls; math, logic, and lists are intrinsic.\n");
+        terminal_write("File I/O uses read/write syscalls; math, logic, and lists are intrinsic.\n");
         terminal_write("Pioneer runs scripts from /system/config/pioneer/boot at startup.\n");
         terminal_write("(uptime) returns seconds; (shutdown) or (poweroff) powers off.\n");
         terminal_write("Files max 4096 bytes; paths max 255 chars. (install) prints guidance.\n");
@@ -594,13 +496,13 @@ value call_function(function_id id, value *args, size_t count)
             (count == 1 && !get_number(&args[0], &status))) {
             return make_error("exit expects an optional numeric status");
         }
-        clearsh_syscall(SYS_EXIT, (uint32_t)status, 0, 0, 0);
+        lucid_process_exit((uint32_t)status);
         return make_error("process exit returned unexpectedly");
     }
 
     if (id == FUNCTION_SHUTDOWN) {
         if (count != 0) return make_error("shutdown takes no arguments");
-        clearsh_syscall(SYS_SHUTDOWN, 0, 0, 0, 0);
+        lucid_fs_write("/system/syscalls/shutdown", "", 0);
         return make_error("shutdown request returned unexpectedly");
     }
 

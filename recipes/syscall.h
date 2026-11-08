@@ -7,24 +7,8 @@
 #include <stdint.h>
 
 #include "syscall_abi.h"
-#include "syscall_exit.h"
-#include "syscall_readline.h"
 #include "syscall_fs_read.h"
 #include "syscall_fs_write.h"
-#include "syscall_fs_list.h"
-#include "syscall_readkey.h"
-#include "syscall_clear.h"
-#include "syscall_shutdown.h"
-#include "syscall_getticks.h"
-#include "syscall_fork.h"
-#include "syscall_exec.h"
-#include "syscall_wait.h"
-#include "syscall_reap.h"
-#include "syscall_terminal_size.h"
-#include "syscall_fs_stat.h"
-#include "syscall_write.h"
-#include "syscall_sleep.h"
-#include "syscall_posix.h"
 
 #define SYS_WM_OPEN 0x300u
 #define SYS_WM_EXIT 0x301u
@@ -50,6 +34,8 @@
 #define SYS_COMPLETION_NAMES_MAX 1024u
 #define SYS_PROMPT_MAX 264u
 
+#include "syscall_files.h"
+
 #ifdef LUCID_USER
 static inline int lucid_read_config_path(const char *config_path,
                                          char path[SYS_PATH_MAX],
@@ -61,9 +47,9 @@ static inline int lucid_read_config_path(const char *config_path,
     char config[SYS_PATH_MAX + 2];
     uint32_t length = lucid_user_syscall(
         SYS_FS_READ,
-        (uint32_t)config_path,
+        (uint32_t)(uintptr_t)config_path,
         config_path_length,
-        (uint32_t)config,
+        (uint32_t)(uintptr_t)config,
         sizeof(config)
     );
     if (length == SYS_UNKNOWN_TEST || length >= sizeof(config)) return 0;
@@ -83,8 +69,7 @@ static inline int lucid_read_config_path(const char *config_path,
 }
 #endif
 
-/* Optional SYS_READLINE metadata. Pass its address in EDX and its size in
- * ESI; pass zero in both registers to retain plain line editing. */
+/* Data written to /system/terminals/readline_config before reading readline. */
 typedef struct {
     uint32_t function_names_length;
     char current_directory[SYS_PATH_MAX];

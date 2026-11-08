@@ -3,8 +3,7 @@
 #include <stdint.h>
 #include <unistd.h>
 
-#include "recipes/syscall_abi.h"
-#include "recipes/syscall_posix.h"
+#include "recipes/syscall.h"
 
 int errno;
 
@@ -74,11 +73,31 @@ static int normalize_path(const char *path,
 static int posix_result(uint32_t raw_result)
 {
     int32_t result = (int32_t)raw_result;
+    if (raw_result == SYS_UNKNOWN_TEST) {
+        errno = EIO;
+        return -1;
+    }
     if (result < 0) {
         errno = (int)(0u - (uint32_t)result);
         return -1;
     }
     return result;
+}
+
+static size_t append_u32(char *buffer, size_t used, uint32_t value)
+{
+    used += lucid_format_u32(buffer + used, value);
+    return used;
+}
+
+static size_t append_signed(char *buffer, size_t used, int32_t value)
+{
+    uint32_t magnitude = (uint32_t)value;
+    if (value < 0) {
+        buffer[used++] = '-';
+        magnitude = 0u - magnitude;
+    }
+    return append_u32(buffer, used, magnitude);
 }
 
 int access(const char *path, int mode)
@@ -95,13 +114,19 @@ int access(const char *path, int mode)
     }
     if (!normalize_path(path, normalized, &path_length)) return -1;
 
-    (void)path_length;
-    return posix_result(lucid_user_syscall(
-        SYSCALL_POSIX_ACCESS,
-        (uint32_t)(uintptr_t)normalized,
-        (uint32_t)mode,
-        0,
-        0
+    uint8_t request[sizeof(uint32_t) + SYS_PATH_MAX];
+    uint32_t mode_bits = (uint32_t)mode;
+    request[0] = (uint8_t)mode_bits;
+    request[1] = (uint8_t)(mode_bits >> 8);
+    request[2] = (uint8_t)(mode_bits >> 16);
+    request[3] = (uint8_t)(mode_bits >> 24);
+    for (uint32_t i = 0; i <= path_length; i++) {
+        request[sizeof(uint32_t) + i] = (uint8_t)normalized[i];
+    }
+    return posix_result(lucid_fs_write(
+        "/system/posix/access",
+        request,
+        sizeof(uint32_t) + path_length + 1
     ));
 }
 
@@ -111,57 +136,77 @@ int open(const char *path, int flags, ...)
     uint32_t path_length;
     if (!normalize_path(path, normalized, &path_length)) return -1;
 
-    (void)path_length;
-    return posix_result(lucid_user_syscall(
-        SYSCALL_POSIX_OPEN,
-        (uint32_t)(uintptr_t)normalized,
-        (uint32_t)flags,
-        0,
-        0
+    uint8_t request[sizeof(uint32_t) + SYS_PATH_MAX];
+    uint32_t flag_bits = (uint32_t)flags;
+    request[0] = (uint8_t)flag_bits;
+    request[1] = (uint8_t)(flag_bits >> 8);
+    request[2] = (uint8_t)(flag_bits >> 16);
+    request[3] = (uint8_t)(flag_bits >> 24);
+    for (uint32_t i = 0; i <= path_length; i++) {
+        request[sizeof(uint32_t) + i] = (uint8_t)normalized[i];
+    }
+    return posix_result(lucid_fs_write(
+        "/system/posix/open",
+        request,
+        sizeof(uint32_t) + path_length + 1
     ));
 }
 
 ssize_t read(int fd, void *buffer, size_t count)
 {
-    return (ssize_t)posix_result(lucid_user_syscall(
-        SYSCALL_POSIX_READ,
-        (uint32_t)fd,
-        (uint32_t)(uintptr_t)buffer,
-        (uint32_t)count,
-        0
+    if (count > SYS_FILE_MAX) count = SYS_FILE_MAX;
+    char path[40];
+    static const char prefix[] = "/system/posix/fd/";
+    size_t used = 0;
+    while (prefix[used]) {
+        path[used] = prefix[used];
+        used++;
+    }
+    used = append_signed(path, used, fd);
+    path[used] = '\0';
+    return (ssize_t)posix_result(lucid_fs_read(
+        path, buffer, (uint32_t)count
     ));
 }
 
 ssize_t write(int fd, const void *buffer, size_t count)
 {
-    return (ssize_t)posix_result(lucid_user_syscall(
-        SYSCALL_POSIX_WRITE,
-        (uint32_t)fd,
-        (uint32_t)(uintptr_t)buffer,
-        (uint32_t)count,
-        0
+    if (count > SYS_FILE_MAX) count = SYS_FILE_MAX;
+    char path[40];
+    static const char prefix[] = "/system/posix/fd/";
+    size_t used = 0;
+    while (prefix[used]) {
+        path[used] = prefix[used];
+        used++;
+    }
+    used = append_signed(path, used, fd);
+    path[used] = '\0';
+    return (ssize_t)posix_result(lucid_fs_write(
+        path, buffer, (uint32_t)count
     ));
 }
 
 int close(int fd)
 {
-    return posix_result(lucid_user_syscall(
-        SYSCALL_POSIX_CLOSE,
-        (uint32_t)fd,
-        0,
-        0,
-        0
+    char request[12];
+    size_t length = append_signed(request, 0, fd);
+    request[length++] = '\n';
+    return posix_result(lucid_fs_write(
+        "/system/posix/close", request, (uint32_t)length
     ));
 }
 
 off_t lseek(int fd, off_t offset, int whence)
 {
-    return (off_t)posix_result(lucid_user_syscall(
-        SYSCALL_POSIX_LSEEK,
-        (uint32_t)fd,
-        (uint32_t)offset,
-        (uint32_t)whence,
-        0
+    char request[36];
+    size_t length = append_signed(request, 0, fd);
+    request[length++] = ' ';
+    length = append_signed(request, length, (int32_t)offset);
+    request[length++] = ' ';
+    length = append_signed(request, length, whence);
+    request[length++] = '\n';
+    return (off_t)posix_result(lucid_fs_write(
+        "/system/posix/lseek", request, (uint32_t)length
     ));
 }
 
@@ -170,14 +215,10 @@ int unlink(const char *path)
     char normalized[SYS_PATH_MAX];
     uint32_t path_length;
     if (!normalize_path(path, normalized, &path_length)) return -1;
-
-    (void)path_length;
-    return posix_result(lucid_user_syscall(
-        SYSCALL_POSIX_UNLINK,
-        (uint32_t)(uintptr_t)normalized,
-        0,
-        0,
-        0
+    return posix_result(lucid_fs_write(
+        "/system/posix/unlink",
+        normalized,
+        path_length + 1
     ));
 }
 
@@ -187,14 +228,11 @@ char *getcwd(char *buffer, size_t size)
         errno = EINVAL;
         return 0;
     }
-    if (posix_result(lucid_user_syscall(
-            SYSCALL_POSIX_GETCWD,
-            (uint32_t)(uintptr_t)buffer,
-            (uint32_t)size,
-            0,
-            0
-        )) < 0) {
+    if (size < 2) {
+        errno = ERANGE;
         return 0;
     }
+    buffer[0] = '/';
+    buffer[1] = '\0';
     return buffer;
 }

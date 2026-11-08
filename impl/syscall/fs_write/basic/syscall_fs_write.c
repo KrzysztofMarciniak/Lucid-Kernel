@@ -27,10 +27,17 @@ static uint32_t syscall_fs_write_handle(syscall_frame *frame)
     const char *user_data = (const char *)frame->edx;
     for (uint32_t i = 0; i < frame->ecx; i++) path[i] = user_path[i];
     path[frame->ecx] = '\0';
+    syscall_file_kind file_kind = syscall_file_lookup(path);
     for (uint32_t i = 0; i < frame->esi; i++) {
         buffer[i] = user_data[i];
     }
-    int result = syscall_file_write(path, buffer, frame->esi);
+    uint32_t operation_result = frame->esi;
+    int result = syscall_file_write(
+        path, buffer, frame->esi, frame, &operation_result
+    );
+    if (result == 3) {
+        return (uint32_t)usermode_process_schedule(frame);
+    }
     if (result < 0 ||
         (result == 0 && ramfs_write(path, buffer, frame->esi))) {
         frame->eax = SYS_UNKNOWN_TEST;
@@ -46,8 +53,10 @@ static uint32_t syscall_fs_write_handle(syscall_frame *frame)
         syscall_text_equals(path, "/system/config/resolution")) {
         terminal_config_reload();
     }
-    terminal_statusbar_refresh();
-    frame->eax = frame->esi;
+    if (file_kind != SYSCALL_FILE_TERMINAL_SCREEN) {
+        terminal_statusbar_refresh();
+    }
+    frame->eax = operation_result;
     return 0;
 }
 

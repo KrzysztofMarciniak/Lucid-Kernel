@@ -1,5 +1,6 @@
 #include "impl/syscall/internal.h"
 #include "recipes/ramfs.h"
+#include "recipes/usermode.h"
 
 static uint32_t syscall_fs_read_handle(syscall_frame *frame)
 {
@@ -17,9 +18,17 @@ static uint32_t syscall_fs_read_handle(syscall_frame *frame)
     const char *user_path = (const char *)frame->ebx;
     for (uint32_t i = 0; i < frame->ecx; i++) path[i] = user_path[i];
     path[frame->ecx] = '\0';
+    if (syscall_text_equals(path, "/system/terminals/readline")) {
+        return syscall_readline_file_handle(frame);
+    }
+
     int result = syscall_file_read(
-        path, buffer, frame->esi, &length
+        path, buffer, frame->esi, &length, frame
     );
+    if (result == 3) {
+        return (uint32_t)usermode_process_schedule(frame);
+    }
+    if (result == 2) return 0;
     if (result < 0 ||
         (result == 0 &&
          ramfs_read(path, buffer, frame->esi, &length))) {

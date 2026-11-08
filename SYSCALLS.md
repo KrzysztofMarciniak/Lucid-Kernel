@@ -1,138 +1,91 @@
-# User-mode syscalls
+# User-mode I/O ABI
 
-Lucid installs the `int 0x80` handler in the `syscall` recipe. A call places
-the syscall number in `EAX` and up to four arguments in `EBX`, `ECX`, `EDX`,
-and `ESI`; the return value is in `EAX`. User pointers are checked against
-user-mapped pages before the kernel reads or writes them. `0xFFFFFFFF` means
-the requested operation failed for the original syscall set. The
-`SYSCALL_POSIX_*` calls instead return negative errno values for failures.
-`exit` returns control to the kernel instead of returning to the caller.
-
-Each public syscall number and argument contract lives in its own header,
-such as [`recipes/syscall_write.h`](recipes/syscall_write.h). The
-[`recipes/syscall.h`](recipes/syscall.h) umbrella includes these headers for
-existing callers. The same list is readable at runtime in
-`/system/info/syscalls`.
+Lucid exposes two numbered system calls. Both use `int 0x80`; the call number
+is in `EAX`, arguments are in `EBX`, `ECX`, `EDX`, and `ESI`, and the result is
+returned in `EAX`. User pointers are validated before access. Ordinary I/O
+failures return `0xFFFFFFFF`; POSIX descriptor endpoints return negative
+errno values.
 
 | Number | Name | Arguments | Result |
 |---:|---|---|---|
-| 0 | `SYS_WRITE` | `EBX` text pointer, `ECX` byte count | bytes written |
-| 1 | `SYS_EXIT` | `EBX` exit status | does not return to user mode |
-| 2 | `SYS_READLINE` | `EBX` output buffer, `ECX` capacity; optional `EDX` pointer to `sys_readline_completion`, `ESI` struct size (both zero for basic editing) | input length |
-| 3 | `SYS_FS_READ` | `EBX` path, `ECX` path length, `EDX` output, `ESI` capacity | bytes read |
-| 4 | `SYS_FS_WRITE` | `EBX` path, `ECX` path length, `EDX` input, `ESI` byte count | bytes written |
-| 5 | `SYS_FS_LIST` | `EBX` path, `ECX` path length, `EDX` output, `ESI` capacity | bytes returned |
-| 6 | `SYS_READKEY` | none | key code |
-| 7 | `SYS_CLEAR` | none | zero |
-| 8 | `SYS_SHUTDOWN` | none | requests ACPI S5 poweroff, with emulator-port fallback |
-| 9 | `SYS_GETTICKS` | none | PIT ticks since boot (100 ticks/second) |
-| 10 | `SYS_FORK` | none | parent gets child PID; child resumes with result 0 |
-| 11 | `SYS_EXEC` | `EBX` path pointer, `ECX` path length | replaces caller with a registered user image; does not return on success |
-| 12 | `SYS_WAIT` | `EBX` child PID | blocks until that child exits, then returns its PID |
-| 13 | `SYS_REAP` | none | releases exited child processes |
-| 14 | `SYS_GET_TERMINAL_SIZE` | none | columns in high 16 bits, rows in low 16 bits |
-| 15 | `SYS_FS_STAT` | `EBX` path, `ECX` path length | 1 for directory, 0 for file |
-| 16 | `SYS_SLEEP` | `EBX` tick count | zero after the requested delay |
-| 17 | `SYSCALL_POSIX_OPEN` | `EBX` path, `ECX` flags | file descriptor; negative errno on failure |
-| 18 | `SYSCALL_POSIX_READ` | `EBX` descriptor, `ECX` output buffer, `EDX` byte count | bytes read; negative errno on failure |
-| 19 | `SYSCALL_POSIX_WRITE` | `EBX` descriptor, `ECX` input buffer, `EDX` byte count | bytes written; negative errno on failure |
-| 20 | `SYSCALL_POSIX_CLOSE` | `EBX` descriptor | zero; negative errno on failure |
-| 21 | `SYSCALL_POSIX_LSEEK` | `EBX` descriptor, `ECX` signed offset, `EDX` whence | resulting offset; negative errno on failure |
-| 22 | `SYSCALL_POSIX_UNLINK` | `EBX` path | zero; negative errno on failure |
-| 23 | `SYSCALL_POSIX_ACCESS` | `EBX` path, `ECX` mode | zero; negative errno on failure |
-| 24 | `SYSCALL_POSIX_GETCWD` | `EBX` buffer, `ECX` size | zero; negative errno on failure |
+| 3 | `SYS_FS_READ` | `EBX` path, `ECX` path length, `EDX` output buffer, `ESI` capacity | bytes read |
+| 4 | `SYS_FS_WRITE` | `EBX` path, `ECX` path length, `EDX` input buffer, `ESI` byte count | bytes written |
 
-Each POSIX syscall has an individual contract header, such as
-`recipes/syscall_posix_open.h`; `recipes/syscall_posix.h` includes the family
-headers and shared open flags. IDs 17–23 are POSIX.1-2008 file interfaces;
-`getcwd` (ID 24) was standardized in POSIX.1-2001 and remains in POSIX.1-2008.
-These labels identify the source API, not a claim of full standard conformance.
-Implementations are selected independently in `config.mk` and live under
-`impl/syscall/posix/<name>/<implementation>/`. Shared descriptor and
-process-lifecycle state lives in `impl/syscall/posix/common/posix.c`.
+All other kernel operations are exposed as virtual files. This removes their
+individual syscall numbers, not the kernel functionality behind the files.
+The paths below are virtual endpoints and are not regular RAMFS files.
 
-Clearsh and other user programs can call `lucid_user_syscall()` from
-`recipes/syscall.h` when compiled with `LUCID_USER`. Clearsh also provides a
-checked `(syscall number ...)` form for the implemented calls. Arguments are
-typed shell values: text for `SYS_WRITE`, file values for filesystem calls,
-a number of ticks for `SYS_SLEEP`, and no arguments for other calls.
-Clearsh allocates user buffers itself;
-scripts cannot supply raw pointers. `SYS_EXIT` is deliberately unavailable through the generic syscall form;
-Clearsh exposes it as `(exit [status])`. Brain manages Eyes as preemptively
-scheduled processes, and the kernel reclaims exited children with
-`SYS_REAP`. `SYS_EXEC` currently resolves paths from the kernel's registered
-embedded-image table. See `SHELL.md` for examples. Named functions such as
-`(uptime)`, `read`, `write`, and `print` remain the simpler interfaces for
-common operations.
+## System and terminal files
 
-The userland libc compatibility layer exposes `access`, `open`, `read`,
-`write`, `close`, `lseek`, `unlink`, and `getcwd` from `include/unistd.h` and
-`include/fcntl.h`. Relative paths are rooted at `/`; `getcwd` therefore always
-reports `/`, and `chdir` is not implemented. `access` supports only `F_OK`,
-since Lucid does not track POSIX permissions. Standard output/error descriptors
-write to the terminal; reading standard input is unsupported. File descriptors
-are inherited by `fork`, share their offsets, and close when a process exits.
-
-This is a deliberately small compatibility subset, not a full POSIX layer.
-Regular RAMFS files are limited to 4096 bytes; directory descriptors, metadata
-APIs, `mmap`, `munmap`, dynamic loading, and the broader hosted C runtime are not
-implemented. TinyCC 0.9.28rc is currently built for the host x86_64 Linux
-environment, and Lucid still embeds user programs as flat images with a 64 KiB
-build-time limit. TinyCC has not yet been built or run as a Lucid user program.
-
-`SYS_READLINE` remains usable with only `EBX` and `ECX`. Clearsh passes the
-optional `sys_readline_completion` structure in `EDX`/`ESI`; it contains the
-current directory, prompt, and newline-separated function names. The kernel
-validates the full structure before using it for Tab completion.
-
-## Syscalls as files
-
-The virtual `/system/syscalls` directory provides file-style access to common
-kernel calls. List its endpoints with `(ls (file /system/syscalls))`. Reading
-or writing an endpoint invokes its syscall; read results are plain text with a
-trailing newline.
-
-| Path | Operation | Behavior |
+| Path | Access | Behavior |
 |---|---|---|
-| `/system/syscalls/write` | write | Sends the supplied bytes to the terminal |
-| `/system/syscalls/readkey` | read | Waits for a key and returns its numeric key code |
-| `/system/syscalls/clear` | write | Clears the calling process's terminal |
-| `/system/syscalls/shutdown` | write | Requests ACPI S5 poweroff, with emulator-port fallback |
-| `/system/syscalls/get_ticks` | read | Returns PIT ticks since boot |
-| `/system/syscalls/terminal_size` | read | Returns `columns rows` |
-| `/system/syscalls/reap` | read | Reaps exited children and returns the count |
+| `/system/syscalls/readkey` | read | Wait for a key and return its numeric code |
+| `/system/syscalls/shutdown` | write | Request ACPI S5 poweroff, with emulator-port fallback |
+| `/system/syscalls/get_ticks` | read | Return PIT ticks since boot |
+| `/system/syscalls/terminal_size` | read | Return `columns rows` |
+| `/system/syscalls/reap` | read | Reap exited children and return the count |
+| `/system/terminals/current` | read/write | Read the calling process's terminal screen; a write replaces it and an empty write clears it |
+| `/system/terminals/readline` | read | Read an edited input line |
+| `/system/terminals/readline_config` | write | Set the prompt, current directory, and completion names for readline |
 
-`/system/processes/list` is a read-only process table with PID, parent PID,
-state, and image columns. Write an image path or unique image basename to
-`/system/processes/kill` to terminate that process. The current process and
-PID 1 cannot be killed; missing or ambiguous names fail.
+`/system/processes/list` reads the process table. Write an image path or unique
+image basename to `/system/processes/kill` to terminate a process; the current
+process and PID 1 cannot be killed. The current process endpoints are:
 
-For example, `(write (file /system/syscalls/write) (text "hello\n"))` writes
-to the terminal, while `(print (read (file /system/syscalls/get_ticks)))`
-returns the current tick count. Write-only endpoints reject reads; read-only
-endpoints reject writes. These virtual nodes are not regular RAMFS files and
-cannot be overwritten with file contents.
+| Path | Access | Behavior |
+|---|---|---|
+| `/system/processes/current/fork` | read | Fork; return the child PID to the parent and zero to the child |
+| `/system/processes/current/exec` | write | Replace the process with a registered embedded image |
+| `/system/processes/current/exit` | write | Exit with the supplied decimal status |
+| `/system/processes/current/wait/<pid>` | read | Wait for a child to exit and return its PID |
+| `/system/processes/current/cwd` | read | Return the current directory (`/`) |
 
-## Adding a syscall
+## Files and timing
 
-1. Add `recipes/syscall_<name>.h` with a stable `SYS_<NAME>` number and a
-   concise register/return contract. Include it from `recipes/syscall.h` to
-   preserve the umbrella API, or include it directly from new callers.
-2. Add an implementation such as
-   `impl/syscall/<name>/basic/syscall_<name>.c`. Implement a handler taking a
-   `syscall_frame *`, validate every user pointer and full byte range before
-   dereferencing it, bound copies, and set an explicit error result for invalid
-   requests. Register it with `SYSCALL_HANDLER(symbol, SYS_<NAME>, handler)`;
-   the linker collects registered handlers, so no dispatch branch is needed.
-3. Add the name to `SYSCALLS` and set `SYSCALL_<NAME>_IMPL=basic` in
-   `config.mk`. The build verifies the contract and selected handler exist and
-   compiles only the configured syscall modules; different calls can select
-   different implementation directories.
-4. Add a narrow typed userspace wrapper or shell builtin if the operation
-   should be available to Clearsh. Do not give shell expressions raw kernel
-   pointers.
-5. Update `/system/info/syscalls` in the RAMFS seed data and this reference.
-6. Add a focused ring-3 test for success and invalid arguments.
+| Path | Access | Behavior |
+|---|---|---|
+| `/system/files/type` | write, then read | Write a path; read `1` for a directory or `0` for a file |
+| `/system/files/watch` | write, then read | Write an existing mutable RAMFS path; the read blocks until it is written or unlinked, then returns `1` |
+| `/system/files/unlink` | write | Unlink the NUL-terminated path |
+| `/system/time/wait/<ticks>` | read | Block until the requested ticks elapse and return the current tick count |
+| `/system/time/sleep/<ticks>` | read | Block for the requested ticks and return zero |
 
-`SYS_READLINE` uses a registered handler, but its editing, history, and
-completion helper implementation remains in `impl/syscall/int80/syscall.c`.
+File watches are one-shot and wake all processes waiting on that path after a
+successful write or unlink. Call the endpoint again to wait for another
+change.
+
+## POSIX compatibility files
+
+The libc compatibility layer keeps descriptors and offsets in the kernel.
+`/system/posix/fd/<fd>` reads from or writes to a descriptor. Other operations
+use `/system/posix` request files:
+
+| Path | Access | Request/result |
+|---|---|---|
+| `/system/posix/open` | write | Four little-endian flag bytes followed by a NUL-terminated path; returns the descriptor or a negative errno |
+| `/system/posix/access` | write | Four little-endian mode bytes followed by a NUL-terminated path; returns zero or a negative errno |
+| `/system/posix/unlink` | write | NUL-terminated path; returns zero or a negative errno |
+| `/system/posix/close` | write | Decimal descriptor; returns zero or a negative errno |
+| `/system/posix/lseek` | write | `fd offset whence`; returns the new offset or a negative errno |
+| `/system/posix/cwd` | read | Return `/` |
+| `/system/posix/error` | read | Return the last POSIX error number |
+
+These are a small compatibility subset, not a complete POSIX implementation.
+Relative paths are rooted at `/`; permissions and `chdir` are not implemented.
+Standard output and error write to the terminal, while standard input reads are
+unsupported.
+
+## Userland and extension
+
+`recipes/syscall.h` provides `lucid_fs_read()` and `lucid_fs_write()` wrappers
+through `recipes/syscall_files.h`, along with helpers for common virtual-file
+operations. Clearsh's `(read ...)` and `(write ...)` use the filesystem calls.
+The checked `(syscall number ...)` form accepts only syscall numbers 3 and 4.
+
+Window-manager events `0x300`–`0x302` are delivered through key input; they are
+not numbered syscalls.
+
+To add a kernel operation, prefer adding a virtual file endpoint to
+`impl/syscall/int80/syscall_files.c` and documenting its path, access mode,
+request format, and result here. Add a numbered syscall only when the operation
+cannot be expressed cleanly as file I/O.

@@ -13,6 +13,16 @@ The prompt shows the current directory:
 λ /users/root>
 ```
 
+Clearsh's terminal is available as `/system/terminals/current`. Each terminal
+process resolves that path to its own displayed screen. Writes replace the
+screen; writing empty text clears it. The `(clear)` function does this, then
+Clearsh prints the next prompt:
+
+```text
+λ /users/root> (clear)
+λ /users/root>
+```
+
 Use Left/Right/Home/End to edit the current line and Up/Down to browse the
 eight most recent commands; moving down past the newest command restores the
 unfinished draft. Ctrl+Left/Right move by words, treating whitespace and Lisp
@@ -110,46 +120,48 @@ branch. `(uptime)` returns seconds since boot.
 
 ## System calls
 
-Clearsh offers a checked `(syscall number ...)` form. It accepts shell values
-and creates any user buffers internally, so scripts cannot pass raw pointers:
+Clearsh offers a checked `(syscall number ...)` form for the two filesystem
+calls. It accepts shell values and creates any user buffers internally, so
+scripts cannot pass raw pointers:
 
 ```lisp
-(syscall 9)
-(syscall 0 (text "hello\n"))
 (syscall 3 (file /system/info/syscalls))
 (syscall 4 (file /users/root/note) (text "saved"))
 ```
 
-Numbers and argument shapes are listed in `/system/info/syscalls`. `SYS_EXIT`
-(number 1) is unavailable through this generic form; use `(exit [status])` to
-exit Clearsh and let Pioneer restart it. Unsupported syscall numbers or
-invalid argument types return an error.
+Only `SYS_FS_READ` (3) and `SYS_FS_WRITE` (4) are numbered syscalls.
+Unsupported numbers or invalid argument types return an error. Process
+creation, waiting, exit, timing, file watches, and POSIX compatibility are
+available through virtual files.
 File and console I/O—including `read`, `write`, `ls`, `vi`, and `run`—uses
 syscalls. Math, logic, and list/lambda evaluation remain Clearsh intrinsics.
 `ls` prints a file's name when given a file path; directory paths still list
 their children.
 
-Common kernel calls are also available as virtual files:
+Kernel operations are available as virtual files:
 
 ```lisp
 (ls (file /system/syscalls))
-(write (file /system/syscalls/write) (text "hello\n"))
+(write (file /system/terminals/current) (text "hello\n"))
+(print (read (file /system/terminals/current)))
 (print (read (file /system/syscalls/get_ticks)))
 (print (read (file /system/syscalls/terminal_size)))
+(print (read (file /system/time/wait/10)))
 ```
 
 `readkey` waits for input and returns a numeric key code; `reap` releases exited
-children. `clear` and `shutdown` are write-only control files, and writing to
-`shutdown` powers off the machine. The directory is virtual; its endpoint
-files cannot be replaced with ordinary file contents. See `SYSCALLS.md` for
-the full endpoint list and per-file behavior.
+children. `shutdown` is a write-only control file, and writing to it powers off
+the machine. The syscall directory is virtual; its endpoints cannot be replaced
+with ordinary file contents. See `SYSCALLS.md` for the full endpoint list and
+per-file behavior.
 
-The virtual `/system/processes` directory provides a process table and a
-service control endpoint:
+The virtual `/system/processes` directory provides a process table, a service
+control endpoint, and current-process lifecycle files:
 
 ```lisp
 (print (read (file /system/processes/list)))
 (write (file /system/processes/kill) (text "brain"))
+(print (read (file /system/processes/current/cwd)))
 ```
 
 `kill` accepts an image path or a unique image basename. It cannot terminate
@@ -171,8 +183,8 @@ the current process or PID 1; ambiguous or missing names return an error.
 
 `(help)` prints concise syntax and examples, including where to read runtime
 system details and the syscall list (`/system/info/syscalls`). Syscalls are
-available through checked built-ins and the typed `(syscall number ...)` form;
-raw user pointers are never accepted.
+available through read/write and the typed `(syscall number ...)` form; other
+kernel operations use virtual files. Raw user pointers are never accepted.
 
 `vi` (also named `edit`) opens a small modal editor. In normal mode, use
 `i`/`a` to insert, `o`/`O` to open a line, `h`/`j`/`k`/`l` or arrows to move,

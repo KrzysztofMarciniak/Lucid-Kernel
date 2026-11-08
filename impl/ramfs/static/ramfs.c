@@ -1,5 +1,6 @@
 #include "ramfs_internal.h"
 #include "recipes/status.h"
+#include "recipes/usermode.h"
 #include "userland_image.h"
 
 ramfs_node ramfs_nodes[RAMFS_MAX_NODES];
@@ -315,6 +316,7 @@ int ramfs_write(const char *path, const char *data, size_t length)
         }
         return RAMFS_NO_SPACE;
     }
+    usermode_process_file_changed(path);
     return RAMFS_OK;
 }
 
@@ -381,6 +383,17 @@ int ramfs_is_directory(const char *path)
     return node->directory ? 1 : 0;
 }
 
+int ramfs_is_watchable(const char *path)
+{
+    if (!ramfs_valid_path(path) || ramfs_info_is_dynamic(path) ||
+        is_embedded_program_path(path)) {
+        return 0;
+    }
+
+    ramfs_node *node = find_node(path);
+    return node && !node->directory;
+}
+
 int ramfs_unlink(const char *path)
 {
     if (!ramfs_valid_path(path)) return RAMFS_INVALID_PATH;
@@ -403,5 +416,6 @@ int ramfs_unlink(const char *path)
         ramfs_node_count++;
         return RAMFS_NO_SPACE;
     }
+    usermode_process_file_changed(path);
     return RAMFS_OK;
 }

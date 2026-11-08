@@ -198,13 +198,7 @@ static size_t build_prompt(char *buffer, size_t capacity)
     static const char default_template[] = "\xCE\xBB %p> ";
     static int config_error_reported;
     char source[128];
-    uint32_t length = clearsh_syscall(
-        SYS_FS_READ,
-        (uint32_t)path,
-        sizeof(path) - 1,
-        (uint32_t)source,
-        sizeof(source)
-    );
+    uint32_t length = lucid_fs_read(path, source, sizeof(source));
     int valid = length != SYS_UNKNOWN_TEST && length < sizeof(source);
     if (valid) {
         while (length &&
@@ -321,12 +315,17 @@ static void read_line(char *buffer,
     }
     completion.function_names_length = (uint32_t)function_names_length;
 
-    uint32_t length = clearsh_syscall(
-        SYS_READLINE,
-        (uint32_t)buffer,
-        capacity,
-        (uint32_t)&completion,
-        sizeof(completion)
+    if (lucid_fs_write(
+            "/system/terminals/readline_config",
+            &completion,
+            sizeof(completion)
+        ) == SYS_UNKNOWN_TEST) {
+        terminal_write("Clearsh: could not configure line completion.\n");
+        buffer[0] = '\0';
+        return;
+    }
+    uint32_t length = lucid_fs_read(
+        "/system/terminals/readline", buffer, (uint32_t)capacity
     );
     if (length == SYS_UNKNOWN_TEST) {
         terminal_write("Clearsh: line input failed.\n");

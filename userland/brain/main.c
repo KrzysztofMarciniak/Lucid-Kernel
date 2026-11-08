@@ -19,35 +19,31 @@ static uint32_t launch_terminal(void)
         return SYS_UNKNOWN_TEST;
     }
 
-    uint32_t pid = lucid_user_syscall(SYS_FORK, 0, 0, 0, 0);
+    uint32_t pid = lucid_process_fork();
     if (pid != 0 && pid != SYS_UNKNOWN_TEST) {
         return pid;
     }
     if (pid == SYS_UNKNOWN_TEST) return pid;
 
-    lucid_user_syscall(
-        SYS_EXEC, (uint32_t)terminal, terminal_length, 0, 0
-    );
+    lucid_process_exec(terminal, terminal_length);
     write_text("Brain: could not start the configured terminal\n");
-    lucid_user_syscall(SYS_EXIT, 127, 0, 0, 0);
+    lucid_process_exit(127);
     for (;;) { }
 }
 
 static void launch_statusbar_worker(void)
 {
     static const char statusbar[] = "/system/bin/statusbar";
-    uint32_t pid = lucid_user_syscall(SYS_FORK, 0, 0, 0, 0);
+    uint32_t pid = lucid_process_fork();
     if (pid == SYS_UNKNOWN_TEST) {
         write_text("Brain: no process slot for the status-bar worker\n");
         return;
     }
     if (pid != 0) return;
 
-    lucid_user_syscall(
-        SYS_EXEC, (uint32_t)statusbar, sizeof(statusbar) - 1, 0, 0
-    );
+    lucid_process_exec(statusbar, sizeof(statusbar) - 1);
     write_text("Brain: could not start the status-bar worker\n");
-    lucid_user_syscall(SYS_EXIT, 127, 0, 0, 0);
+    lucid_process_exit(127);
     for (;;) { }
 }
 
@@ -63,7 +59,7 @@ void brain_user_entry(void)
     }
 
     for (;;) {
-        uint32_t event = lucid_user_syscall(SYS_READKEY, 0, 0, 0, 0);
+        uint32_t event = lucid_read_key();
         if (event == SYS_WM_OPEN) {
             if (launch_terminal() == SYS_UNKNOWN_TEST) {
                 write_text(
@@ -73,10 +69,10 @@ void brain_user_entry(void)
             }
         } else if (event == SYS_WM_REAP) {
             write_text("Brain: reaping terminal\n");
-            lucid_user_syscall(SYS_REAP, 0, 0, 0, 0);
+            lucid_process_reap();
         } else if (event == SYS_WM_EXIT) {
             write_text("Brain: exiting\n");
-            lucid_user_syscall(SYS_EXIT, 0, 0, 0, 0);
+            lucid_process_exit(0);
             for (;;) { }
         }
     }

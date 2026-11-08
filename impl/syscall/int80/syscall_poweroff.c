@@ -12,14 +12,3 @@ void syscall_poweroff_system(void)
     terminal_flush();
     for (;;) __asm__ volatile ("hlt");
 }
-
-static uint32_t syscall_shutdown_handle(syscall_frame *frame)
-{
-    (void)frame;
-    syscall_poweroff_system();
-    return 0;
-}
-
-SYSCALL_HANDLER(
-    syscall_shutdown_entry, SYS_SHUTDOWN, syscall_shutdown_handle
-);

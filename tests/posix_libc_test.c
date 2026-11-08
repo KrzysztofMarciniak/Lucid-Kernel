@@ -3,8 +3,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 
-#include "recipes/syscall_abi.h"
-#include "recipes/syscall_posix.h"
+#include "recipes/syscall.h"
 
 static uint32_t mock_result;
 static uint32_t mock_call_count;
@@ -46,8 +45,7 @@ int main(void)
     CHECK(access("/system/bin/tcc", F_OK) == 0);
     CHECK(errno == 0);
     CHECK(mock_call_count == 1);
-    CHECK(mock_number == SYSCALL_POSIX_ACCESS);
-    CHECK(mock_arg2 == F_OK);
+    CHECK(mock_number == SYS_FS_WRITE);
 
     mock_result = 0;
     CHECK(access("/system/bin", F_OK) == 0);
@@ -55,8 +53,7 @@ int main(void)
 
     mock_result = 0;
     CHECK(access("users/root/welcome", F_OK) == 0);
-    CHECK(mock_number == SYSCALL_POSIX_ACCESS);
-    CHECK(mock_arg2 == F_OK);
+    CHECK(mock_number == SYS_FS_WRITE);
 
     mock_result = (uint32_t)(-ENOENT);
     CHECK(access("/missing", F_OK) == -1);
@@ -78,8 +75,7 @@ int main(void)
     CHECK(mock_call_count == calls_before);
 
     CHECK(access("relative", F_OK) == 0);
-    CHECK(mock_number == SYSCALL_POSIX_ACCESS);
-    CHECK(mock_arg2 == F_OK);
+    CHECK(mock_number == SYS_FS_WRITE);
     calls_before = mock_call_count;
 
     char too_long[SYS_PATH_MAX + 1];
@@ -91,47 +87,39 @@ int main(void)
 
     mock_result = 7;
     CHECK(open("input.c", O_RDONLY) == 7);
-    CHECK(mock_number == SYSCALL_POSIX_OPEN);
-    CHECK(mock_arg2 == O_RDONLY);
-    CHECK(mock_arg3 == 0);
-    CHECK(mock_arg4 == 0);
+    CHECK(mock_number == SYS_FS_WRITE);
+    CHECK(mock_arg2 > 4);
 
     char buffer[8];
     mock_result = 4;
     CHECK(read(7, buffer, sizeof(buffer)) == 4);
-    CHECK(mock_number == SYSCALL_POSIX_READ);
-    CHECK(mock_arg1 == 7);
-    CHECK(mock_arg3 == sizeof(buffer));
-    CHECK(mock_arg4 == 0);
+    CHECK(mock_number == SYS_FS_READ);
+    CHECK(mock_arg4 == sizeof(buffer));
 
     mock_result = (uint32_t)(-EBADF);
     CHECK(write(7, buffer, sizeof(buffer)) == -1);
     CHECK(errno == EBADF);
-    CHECK(mock_number == SYSCALL_POSIX_WRITE);
-    CHECK(mock_arg1 == 7);
+    CHECK(mock_number == SYS_FS_WRITE);
 
     mock_result = 2;
     CHECK(lseek(7, 2, 0) == 2);
-    CHECK(mock_number == SYSCALL_POSIX_LSEEK);
-    CHECK(mock_arg1 == 7);
+    CHECK(mock_number == SYS_FS_WRITE);
 
     mock_result = 0;
     CHECK(close(7) == 0);
-    CHECK(mock_number == SYSCALL_POSIX_CLOSE);
-    CHECK(mock_arg1 == 7);
+    CHECK(mock_number == SYS_FS_WRITE);
     CHECK(unlink("output.o") == 0);
-    CHECK(mock_number == SYSCALL_POSIX_UNLINK);
+    CHECK(mock_number == SYS_FS_WRITE);
 
     mock_result = (uint32_t)(-ENOENT);
     CHECK(open("missing.c", O_RDONLY) == -1);
     CHECK(errno == ENOENT);
 
     char cwd[2];
-    mock_result = 0;
+    calls_before = mock_call_count;
     CHECK(getcwd(cwd, sizeof(cwd)) == cwd);
-    CHECK(mock_number == SYSCALL_POSIX_GETCWD);
-    CHECK(mock_arg2 == sizeof(cwd));
-    mock_result = (uint32_t)(-ERANGE);
+    CHECK(cwd[0] == '/' && cwd[1] == '\0');
+    CHECK(mock_call_count == calls_before);
     CHECK(getcwd(cwd, 1) == 0);
     CHECK(errno == ERANGE);
 

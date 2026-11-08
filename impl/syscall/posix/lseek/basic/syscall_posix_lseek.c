@@ -35,7 +35,7 @@ static int32_t posix_seek_file(uint32_t fd,
     return (int32_t)next;
 }
 
-static uint32_t syscall_posix_lseek_handle(syscall_frame *frame)
+uint32_t syscall_posix_lseek_handle(syscall_frame *frame)
 {
     frame->eax = (uint32_t)posix_seek_file(
         frame->ebx, (int32_t)frame->ecx, frame->edx,
@@ -43,7 +43,3 @@ static uint32_t syscall_posix_lseek_handle(syscall_frame *frame)
     );
     return 0;
 }
-
-SYSCALL_HANDLER(syscall_posix_lseek_entry,
-                SYSCALL_POSIX_LSEEK,
-                syscall_posix_lseek_handle);

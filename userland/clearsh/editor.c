@@ -363,7 +363,9 @@ value edit_file(const value *file)
     char status[64] = "";
     editor_screen_valid = 0;
     editor_view_top = 0;
-    terminal_clear();
+    if (!terminal_file_clear()) {
+        return make_error("terminal could not be cleared");
+    }
     for (;;) {
         editor_render(file->data.text, buffer, length, cursor,
                       insert_mode, modified, status);
@@ -461,7 +463,9 @@ value edit_file(const value *file)
         } else if (key == ':') {
             if (editor_command(file, buffer, length, cursor,
                                &insert_mode, &modified, status)) {
-                terminal_clear();
+                if (!terminal_file_clear()) {
+                    return make_error("terminal could not be cleared");
+                }
                 return make_value(VALUE_NIL);
             }
         } else {

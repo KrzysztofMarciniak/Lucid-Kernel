@@ -30,7 +30,7 @@ static int32_t posix_read_file(syscall_frame *frame, uint32_t slot)
     char *buffer = syscall_filesystem_buffer();
     size_t length = 0;
     int result = syscall_file_read(
-        description->path, buffer, SYS_FILE_MAX, &length
+        description->path, buffer, SYS_FILE_MAX, &length, frame
     );
     if (result == 0) {
         result = ramfs_read(
@@ -52,14 +52,10 @@ static int32_t posix_read_file(syscall_frame *frame, uint32_t slot)
     return (int32_t)amount;
 }
 
-static uint32_t syscall_posix_read_handle(syscall_frame *frame)
+uint32_t syscall_posix_read_handle(syscall_frame *frame)
 {
     frame->eax = (uint32_t)posix_read_file(
         frame, syscall_posix_current_slot()
     );
     return 0;
 }
-
-SYSCALL_HANDLER(syscall_posix_read_entry,
-                SYSCALL_POSIX_READ,
-                syscall_posix_read_handle);

@@ -1,12 +1,46 @@
 #include "clearsh_internal.h"
 
-uint32_t clearsh_syscall(uint32_t number,
-                         uint32_t arg1,
-                         uint32_t arg2,
-                         uint32_t arg3,
-                         uint32_t arg4)
+static const char terminal_screen_path[] = "/system/terminals/current";
+static const char empty_text[] = "";
+static char terminal_screen[SYS_FILE_MAX];
+
+static void terminal_append(const char *text, size_t length)
 {
-    return lucid_user_syscall(number, arg1, arg2, arg3, arg4);
+    while (length) {
+        size_t chunk_length = length > SYS_FILE_MAX
+            ? SYS_FILE_MAX
+            : length;
+        uint32_t screen_length = lucid_fs_read(
+            terminal_screen_path, terminal_screen, sizeof(terminal_screen)
+        );
+        if (screen_length == SYS_UNKNOWN_TEST ||
+            screen_length > sizeof(terminal_screen)) {
+            return;
+        }
+
+        if (screen_length + chunk_length > sizeof(terminal_screen)) {
+            size_t drop = screen_length + chunk_length -
+                          sizeof(terminal_screen);
+            while (drop < screen_length &&
+                   terminal_screen[drop] != '\n') {
+                drop++;
+            }
+            if (drop < screen_length) drop++;
+            if (drop > screen_length) drop = screen_length;
+            screen_length -= (uint32_t)drop;
+            for (size_t i = 0; i < screen_length; i++) {
+                terminal_screen[i] = terminal_screen[i + drop];
+            }
+        }
+
+        for (size_t i = 0; i < chunk_length; i++) {
+            terminal_screen[screen_length + i] = text[i];
+        }
+        screen_length += (uint32_t)chunk_length;
+        lucid_fs_write(terminal_screen_path, terminal_screen, screen_length);
+        text += chunk_length;
+        length -= chunk_length;
+    }
 }
 
 void terminal_write(const char *text)
@@ -14,29 +48,30 @@ void terminal_write(const char *text)
     if (clearsh_quiet_output) return;
     size_t length = 0;
     while (text[length]) length++;
-    lucid_write(text, (uint32_t)length);
+    terminal_append(text, length);
 }
 
 void terminal_putc(char c)
 {
     if (clearsh_quiet_output) return;
-    lucid_write(&c, 1);
+    terminal_append(&c, 1);
 }
 
 uint32_t terminal_read_key(void)
 {
-    return clearsh_syscall(SYS_READKEY, 0, 0, 0, 0);
+    return lucid_read_key();
 }
 
 uint32_t terminal_get_size(void)
 {
-    return clearsh_syscall(SYS_GET_TERMINAL_SIZE, 0, 0, 0, 0);
+    return lucid_terminal_size();
 }
 
-void terminal_clear(void)
+int terminal_file_clear(void)
 {
-    if (clearsh_quiet_output) return;
-    clearsh_syscall(SYS_CLEAR, 0, 0, 0, 0);
+    if (clearsh_quiet_output) return 1;
+    return lucid_fs_write(terminal_screen_path, empty_text, 0) !=
+        SYS_UNKNOWN_TEST;
 }
 
 int ramfs_read(const char *path,
@@ -44,15 +79,7 @@ int ramfs_read(const char *path,
                size_t capacity,
                size_t *length)
 {
-    size_t path_length = 0;
-    while (path[path_length]) path_length++;
-    uint32_t result = clearsh_syscall(
-        SYS_FS_READ,
-        (uint32_t)path,
-        path_length,
-        (uint32_t)buffer,
-        capacity
-    );
+    uint32_t result = lucid_fs_read(path, buffer, (uint32_t)capacity);
     if (result == SYS_UNKNOWN_TEST || result > capacity) return 1;
     *length = result;
     return 0;
@@ -60,15 +87,7 @@ int ramfs_read(const char *path,
 
 int ramfs_write(const char *path, const char *data, size_t length)
 {
-    size_t path_length = 0;
-    while (path[path_length]) path_length++;
-    return clearsh_syscall(
-        SYS_FS_WRITE,
-        (uint32_t)path,
-        path_length,
-        (uint32_t)data,
-        length
-    ) == SYS_UNKNOWN_TEST;
+    return lucid_fs_write(path, data, (uint32_t)length) == SYS_UNKNOWN_TEST;
 }
 
 int ramfs_list(const char *path,
@@ -76,15 +95,7 @@ int ramfs_list(const char *path,
                size_t capacity,
                size_t *length)
 {
-    size_t path_length = 0;
-    while (path[path_length]) path_length++;
-    uint32_t result = clearsh_syscall(
-        SYS_FS_LIST,
-        (uint32_t)path,
-        path_length,
-        (uint32_t)buffer,
-        capacity
-    );
+    uint32_t result = lucid_fs_read(path, buffer, (uint32_t)capacity);
     if (result == SYS_UNKNOWN_TEST || result > capacity) return 1;
     *length = result;
     return 0;
@@ -92,15 +103,5 @@ int ramfs_list(const char *path,
 
 int ramfs_is_directory(const char *path)
 {
-    size_t path_length = 0;
-    while (path[path_length]) path_length++;
-    uint32_t result = clearsh_syscall(
-        SYS_FS_STAT,
-        (uint32_t)path,
-        path_length,
-        0,
-        0
-    );
-    if (result == SYS_UNKNOWN_TEST) return -1;
-    return result ? 1 : 0;
+    return lucid_fs_is_directory(path);
 }

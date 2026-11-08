@@ -2,7 +2,7 @@
 
 A non-POSIX, KISS kernel. Everything is a file.
 
-![Logo](LogoLucid.png)
+![Logo](imgs/LogoLucid.png)
 
 ## Philosophy
 
@@ -11,7 +11,7 @@ A non-POSIX, KISS kernel. Everything is a file.
 - **Everything is a file** — processes, devices, IPC, network, memory: all reachable and
   controllable through one namespace. No ioctl. No sysctl. No hidden side channels.
 
-![Terminal Screenshot](screenshot.png)
+![Terminal Screenshot](imgs/screenshot.png)
 
 ## Hardware Requirements (minimum)
 
@@ -52,7 +52,7 @@ Eye terminal running Clearsh.
 ```
 ./build.sh                  build only
 ./build.sh run              build + boot in QEMU (serial output in terminal)
-./build.sh test             headless smoke test (auto-exits after ring-3 SYS_WRITE)
+./build.sh test             host wrapper tests + headless ring-3 smoke test
 ./build.sh disk             create a bootable 128 MiB BIOS disk image
 ./build.sh disk-run         create and boot that image in QEMU
 ./build.sh clean            remove build artifacts
@@ -80,10 +80,11 @@ make get-font
 `./build.sh run` boots into the terminal-only serial console by default, using
 text-mode dimensions instead of assuming a graphical framebuffer. Use
 `QEMU_DISPLAY=gtk ./build.sh run` for the graphical framebuffer VM, or
-`./build.sh test` for a bounded, headless serial smoke test. It checks that an
-invalid `SYS_WRITE` and `SYS_FS_READ` pointer are rejected, and exercises
-filesystem read/list/stat before exiting after a valid ring-3 write. The
-default timeout is 30 seconds; set `QEMU_TEST_TIMEOUT=60s` to extend it.
+`./build.sh test` for the host POSIX-wrapper tests and a bounded, headless
+ring-3 integration test. The integration test exercises the read/write syscall
+ABI, virtual filesystem operations, process control, timing, file watches, and
+POSIX descriptor wrappers. The default timeout is 30 seconds; set
+`QEMU_TEST_TIMEOUT=60s` to extend it.
 If the bundled compiler and image tools are missing, `./build.sh install-all`
 builds local copies under `.thirdparty/local`.
 
@@ -95,8 +96,8 @@ settings are:
 | Setting | Meaning |
 |---|---|
 | `INIT_BOOT` | Comma-separated list of boot recipes. Order matters: the build checks that each recipe's dependencies appear earlier in the list. |
-| `SYSCALLS` | Comma-separated list of enabled syscall modules. Each name selects `recipes/syscall_<name>.h`; its `SYSCALL_<NAME>_IMPL` setting selects `impl/syscall/<name>/<implementation>/syscall_<name>.c`. |
-| `SYSCALL_IMPL` | Selects the syscall transport/dispatcher implementation, such as `int80`. Each syscall handler is selected independently with `SYSCALL_<NAME>_IMPL`, so different calls can use different implementations. |
+| `SYSCALLS` | Comma-separated list of numbered syscall modules. Lucid currently enables only `fs_read` and `fs_write`; kernel operations are exposed through virtual files. |
+| `SYSCALL_IMPL` | Selects the transport/dispatcher for the filesystem calls, currently `int80`. |
 | `<RECIPE>_IMPL` | Selects the implementation directory for a recipe; for example, `TIMER_IMPL=pit250hz` selects `impl/timer/pit250hz`. The selected directory must exist. |
 | `MEMORY_MB` | RAM assigned to QEMU and the physical-memory range managed by the kernel's frame allocator. The allocator assumes this range is contiguous and does not yet read the firmware memory map. |
 | `LOW_RESERVED_MB` | Physical memory below this many MiB is reserved and never allocated; the default is 4 MiB. Use `1 <= LOW_RESERVED_MB < MEMORY_MB`. |
@@ -153,19 +154,20 @@ The easiest way to try a syscall in Clearsh is through its virtual syscall
 files:
 
 ```lisp
-(write (file /system/syscalls/write) (text "Hello from Lucid!\n"))
+(write (file /system/terminals/current) (text "Hello from Lucid!\n"))
 (print (read (file /system/syscalls/get_ticks)))
 ```
 
-Clearsh also provides a checked `(syscall number ...)` form. For example,
-`(syscall 0 (text "Hello from Lucid!\n"))` writes text and `(syscall 9)` reads
-the PIT tick count. Arguments are typed shell values; Clearsh does not expose
-raw kernel pointers.
+Clearsh also provides a checked `(syscall number ...)` form, limited to
+filesystem read (3) and write (4). Arguments are typed shell values; Clearsh
+does not expose raw kernel pointers. Other operations use virtual file
+endpoints such as `/system/syscalls/get_ticks` and
+`/system/processes/current/fork`.
 
-A ring-3 C program uses the wrapper in `recipes/syscall.h`. This example calls
-`SYS_WRITE`, passing the address and byte length of a user-space string:
-the wrapper invokes `int 0x80` with the syscall number in `EAX`, arguments in
-`EBX`/`ECX`/`EDX`/`ESI`, and reads the result from `EAX`.
+A ring-3 C program uses the wrappers in `recipes/syscall.h`. This example
+writes a regular file through `SYS_FS_WRITE`; the wrapper invokes `int 0x80`
+with the syscall number in `EAX`, arguments in `EBX`/`ECX`/`EDX`/`ESI`, and
+reads the result from `EAX`.
 
 ```c
 #define LUCID_USER
@@ -175,26 +177,17 @@ __attribute__((section(".entry")))
 void example_user_entry(void)
 {
     static const char message[] = "Hello from ring 3!\n";
-    uint32_t result = lucid_user_syscall(
-        SYS_WRITE,
-        (uint32_t)message,
-        sizeof(message) - 1,
-        0,
-        0
-    );
-
-    if (result == SYS_UNKNOWN_TEST) {
-        lucid_user_syscall(SYS_EXIT, 1, 0, 0, 0);
-        for (;;) { }
-    }
+    (void)lucid_fs_write("/tmp/hello", message, sizeof(message) - 1);
+    lucid_process_exit(0);
 }
 ```
 
-On success, `SYS_WRITE` returns the number of bytes written; failures return
-`SYS_UNKNOWN_TEST`. The kernel validates user pointers before accessing them.
-See [SYSCALLS.md](SYSCALLS.md) for the syscall numbers, argument registers,
-return values, and instructions for adding a syscall. User images must
-currently be embedded and registered in the kernel before `exec` can run them.
+On success, filesystem writes return the number of bytes written; ordinary I/O
+failures return `SYS_UNKNOWN_TEST`, while POSIX descriptor endpoints return
+negative errno values. The kernel validates user pointers before accessing
+them. See [SYSCALLS.md](SYSCALLS.md) for the two syscall numbers and virtual
+file endpoints. User images must currently be embedded and registered in the
+kernel before `exec` can run them.
 
 ### Make a bootable USB
 

@@ -55,6 +55,12 @@ void usermode_set_return_esp(uint32_t esp);
 
 uint32_t usermode_process_fork(usermode_frame *frame);
 int usermode_process_wait(uint32_t pid, usermode_frame *frame);
+int usermode_process_wait_ticks(uint32_t ticks,
+                                int return_zero,
+                                usermode_frame *frame);
+void usermode_process_tick(uint32_t ticks);
+void usermode_process_watch_file(const char *path, usermode_frame *frame);
+void usermode_process_file_changed(const char *path);
 int usermode_process_exec(const char *path, usermode_frame *frame);
 void usermode_process_exit(uint32_t status);
 uint32_t *usermode_process_schedule(usermode_frame *frame);

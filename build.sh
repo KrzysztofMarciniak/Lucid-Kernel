@@ -331,6 +331,10 @@ for name in $names; do
                 IFS=','
             done
             IFS="$old_ifs"
+            for source in "$IMPL_DIR"/syscall/posix/*/basic/*.c; do
+                [ -f "$source" ] || continue
+                echo "$source"
+            done
             source="$IMPL_DIR/syscall/posix/common/posix.c"
             if [ ! -f "$source" ]; then
                 echo "ERROR: POSIX syscall support source $source does not exist" >&2

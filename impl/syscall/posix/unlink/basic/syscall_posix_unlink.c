@@ -13,12 +13,8 @@ static int32_t posix_unlink_file(syscall_frame *frame)
     return result == RAMFS_OK ? 0 : syscall_posix_ramfs_error(result);
 }
 
-static uint32_t syscall_posix_unlink_handle(syscall_frame *frame)
+uint32_t syscall_posix_unlink_handle(syscall_frame *frame)
 {
     frame->eax = (uint32_t)posix_unlink_file(frame);
     return 0;
 }
-
-SYSCALL_HANDLER(syscall_posix_unlink_entry,
-                SYSCALL_POSIX_UNLINK,
-                syscall_posix_unlink_handle);

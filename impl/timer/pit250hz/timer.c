@@ -15,6 +15,7 @@ uint32_t *timer_tick_handler(uint32_t *stack)
     if (clock_tick_phase >= TIMER_IRQ_HZ) {
         clock_tick_phase -= TIMER_IRQ_HZ;
         timer_ticks++;
+        usermode_process_tick(timer_ticks);
     }
 
     outb(0x20, 0x20);

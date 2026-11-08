@@ -12,6 +12,15 @@
     (USERMODE_PROCESS_SLOTS * POSIX_FD_COUNT)
 #define POSIX_INVALID_DESCRIPTION 0xFFu
 
+typedef enum {
+    POSIX_FILE_OPEN,
+    POSIX_FILE_ACCESS,
+    POSIX_FILE_UNLINK,
+    POSIX_FILE_CLOSE,
+    POSIX_FILE_LSEEK,
+    POSIX_FILE_WRITE
+} posix_file_operation;
+
 typedef struct {
     uint8_t initialized;
     uint8_t closed_standard;
@@ -44,5 +53,15 @@ int32_t syscall_posix_copy_user_path(uint32_t address,
 
 void syscall_posix_process_fork(uint32_t parent_slot, uint32_t child_slot);
 void syscall_posix_process_exit(uint32_t slot);
+void syscall_posix_set_last_error(uint32_t slot, int32_t result);
+int32_t syscall_posix_last_error(uint32_t slot);
+
+uint32_t syscall_posix_open_handle(syscall_frame *frame);
+uint32_t syscall_posix_read_handle(syscall_frame *frame);
+uint32_t syscall_posix_write_handle(syscall_frame *frame);
+uint32_t syscall_posix_close_handle(syscall_frame *frame);
+uint32_t syscall_posix_lseek_handle(syscall_frame *frame);
+uint32_t syscall_posix_unlink_handle(syscall_frame *frame);
+uint32_t syscall_posix_access_handle(syscall_frame *frame);
 
 #endif

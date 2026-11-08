@@ -13,6 +13,7 @@ static const function_binding functions[] = {
     { "file", FUNCTION_FILE },
     { "read", FUNCTION_READ },
     { "write", FUNCTION_WRITE },
+    { "clear", FUNCTION_CLEAR },
     { "print", FUNCTION_PRINT },
     { "text", FUNCTION_TEXT },
     { "list", FUNCTION_LIST },

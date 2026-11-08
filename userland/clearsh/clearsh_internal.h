@@ -30,6 +30,7 @@ typedef enum {
     FUNCTION_FILE,
     FUNCTION_READ,
     FUNCTION_WRITE,
+    FUNCTION_CLEAR,
     FUNCTION_PRINT,
     FUNCTION_TEXT,
     FUNCTION_LIST,
@@ -99,13 +100,11 @@ extern char pending_script_path[PATH_MAX];
 extern int script_pending;
 extern int clearsh_quiet_output;
 
-uint32_t clearsh_syscall(uint32_t number, uint32_t arg1, uint32_t arg2,
-                         uint32_t arg3, uint32_t arg4);
 void terminal_write(const char *text);
 void terminal_putc(char c);
 uint32_t terminal_read_key(void);
 uint32_t terminal_get_size(void);
-void terminal_clear(void);
+int terminal_file_clear(void);
 int ramfs_read(const char *path, char *buffer, size_t capacity, size_t *length);
 int ramfs_write(const char *path, const char *data, size_t length);
 int ramfs_list(const char *path, char *buffer, size_t capacity, size_t *length);

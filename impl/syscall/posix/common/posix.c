@@ -4,6 +4,18 @@
 
 static posix_process_state process_states[USERMODE_PROCESS_SLOTS];
 static posix_open_description descriptions[POSIX_DESCRIPTION_COUNT];
+static int32_t last_errors[USERMODE_PROCESS_SLOTS];
+
+void syscall_posix_set_last_error(uint32_t slot, int32_t result)
+{
+    if (slot >= USERMODE_PROCESS_SLOTS) return;
+    last_errors[slot] = result < 0 ? -result : 0;
+}
+
+int32_t syscall_posix_last_error(uint32_t slot)
+{
+    return slot < USERMODE_PROCESS_SLOTS ? last_errors[slot] : 0;
+}
 
 static void release_description(uint32_t index)
 {

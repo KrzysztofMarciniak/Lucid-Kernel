@@ -2,6 +2,7 @@
 #define LUCID_RECIPE_TERMINAL_H
 
 #include "recipes/status.h"
+#include <stddef.h>
 #include "stdint.h"
 
 struct multiboot_info;
@@ -42,6 +43,7 @@ void terminal_set_status(const char *text);
 
 void terminal_putc(char c);
 void terminal_write(const char *s);
+int terminal_screen_read(char *buffer, size_t capacity, size_t *length);
 void terminal_flush(void);
 void terminal_clear(void);
 void terminal_cursor_show(void);

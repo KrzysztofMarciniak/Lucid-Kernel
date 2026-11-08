@@ -21,12 +21,8 @@ static int32_t posix_access_file(syscall_frame *frame)
     return 0;
 }
 
-static uint32_t syscall_posix_access_handle(syscall_frame *frame)
+uint32_t syscall_posix_access_handle(syscall_frame *frame)
 {
     frame->eax = (uint32_t)posix_access_file(frame);
     return 0;
 }
-
-SYSCALL_HANDLER(syscall_posix_access_entry,
-                SYSCALL_POSIX_ACCESS,
-                syscall_posix_access_handle);

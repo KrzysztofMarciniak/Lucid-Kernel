@@ -19,24 +19,24 @@ static void write_text(const char *text)
 
 static void exit_process(uint32_t status)
 {
-    lucid_user_syscall(SYS_EXIT, status, 0, 0, 0);
+    lucid_process_exit(status);
     for (;;) { }
 }
 
 static void run_child(const char *path)
 {
-    uint32_t pid = lucid_user_syscall(SYS_FORK, 0, 0, 0, 0);
+    uint32_t pid = lucid_process_fork();
     if (pid == SYS_UNKNOWN_TEST) {
         write_text("Pioneer: fork failed\n");
         exit_process(1);
     }
     if (pid == 0) {
         uint32_t length = text_length(path);
-        lucid_user_syscall(SYS_EXEC, (uint32_t)path, length, 0, 0);
+        lucid_process_exec(path, length);
         write_text("Pioneer: exec failed\n");
         exit_process(127);
     }
-    if (lucid_user_syscall(SYS_WAIT, pid, 0, 0, 0) == SYS_UNKNOWN_TEST) {
+    if (lucid_process_wait(pid) == SYS_UNKNOWN_TEST) {
         write_text("Pioneer: wait failed\n");
         exit_process(1);
     }
@@ -80,7 +80,7 @@ static void test_posix_file_io(void)
         for (;;) { }
     }
 
-    uint32_t child_pid = lucid_user_syscall(SYS_FORK, 0, 0, 0, 0);
+    uint32_t child_pid = lucid_process_fork();
     if (child_pid == 0) {
         char first;
         if (read(fd, &first, 1) != 1 || first != contents[0]) {
@@ -89,7 +89,7 @@ static void test_posix_file_io(void)
         exit_process(0);
     }
     if (child_pid == SYS_UNKNOWN_TEST ||
-        lucid_user_syscall(SYS_WAIT, child_pid, 0, 0, 0) != child_pid ||
+        lucid_process_wait(child_pid) != child_pid ||
         read(fd, buffer, 1) != 1 || buffer[0] != contents[1] ||
         lseek(fd, 0, SEEK_SET) != 0 ||
         read(fd, buffer, sizeof(contents) - 1) !=
@@ -105,6 +105,9 @@ static void test_posix_file_io(void)
         for (;;) { }
     }
     if (close(fd) != -1 || errno != EBADF) {
+        for (;;) { }
+    }
+    if (close(-1) != -1 || errno != EBADF) {
         for (;;) { }
     }
 
@@ -144,6 +147,56 @@ static void test_posix_file_io(void)
         }
     }
     if (access("users/root/welcome", F_OK) != 0) {
+        for (;;) { }
+    }
+}
+
+static void test_file_watch(void)
+{
+    static const char path[] = "/users/root/.lucid-watch-test";
+    static const char contents[] = "watch notification\n";
+    static const char missing_path[] = "/users/root/.lucid-watch-missing";
+
+    int fd = open(path, O_RDWR | O_CREAT | O_TRUNC, 0600);
+    if (fd < 0 ||
+        lucid_user_syscall(
+            SYS_FS_WRITE,
+            (uint32_t)"/system/files/watch",
+            sizeof("/system/files/watch") - 1,
+            0xFFFFFFFFu,
+            sizeof(path) - 1
+        ) != SYS_UNKNOWN_TEST ||
+        lucid_fs_watch(missing_path) != SYS_UNKNOWN_TEST) {
+        for (;;) { }
+    }
+
+    uint32_t child_pid = lucid_process_fork();
+    if (child_pid == 0) {
+        lucid_sleep(2);
+        exit_process(
+            write(fd, contents, sizeof(contents) - 1) ==
+                    (ssize_t)(sizeof(contents) - 1)
+                ? 0
+                : 1
+        );
+    }
+    if (child_pid == SYS_UNKNOWN_TEST ||
+        lucid_fs_watch(path) != 1 ||
+        lucid_process_wait(child_pid) != child_pid) {
+        for (;;) { }
+    }
+
+    child_pid = lucid_process_fork();
+    if (child_pid == 0) {
+        lucid_sleep(2);
+        exit_process(unlink(path) == 0 ? 0 : 1);
+    }
+    if (child_pid == SYS_UNKNOWN_TEST ||
+        lucid_fs_watch(path) != 1 ||
+        lucid_process_wait(child_pid) != child_pid ||
+        close(fd) != 0 ||
+        access(path, F_OK) != -1 ||
+        errno != ENOENT) {
         for (;;) { }
     }
 }
@@ -192,11 +245,19 @@ static void test_syscall_modules(void)
     };
     static const char system_path[] = "/system";
     static const char syscall_dir[] = "/system/syscalls";
+    static const char terminal_dir[] = "/system/terminals";
+    static const char terminal_path[] = "/system/terminals/current";
+    static const char terminal_message[] = "terminal-file replacement";
+    static const char empty_text[] = "";
     static const char process_dir[] = "/system/processes";
+    static const char process_dir_listing[] = "current\nkill\nlist\n";
     static const char process_list[] = "/system/processes/list";
     static const char process_kill[] = "/system/processes/kill";
     static const char self_image[] = "/system/bin/pioneer";
+    static const char terminal_dir_listing[] =
+        "current\nreadline\nreadline_config\n";
     char buffer[256];
+    char terminal_contents[SYS_FILE_MAX];
     char configured_path[SYS_PATH_MAX];
     uint32_t result = lucid_user_syscall(
         SYS_FS_READ,
@@ -209,13 +270,7 @@ static void test_syscall_modules(void)
         for (;;) { }
     }
 
-    result = lucid_user_syscall(
-        SYS_FS_STAT,
-        (uint32_t)defaults_dir,
-        sizeof(defaults_dir) - 1,
-        0,
-        0
-    );
+    result = (uint32_t)lucid_fs_is_directory(defaults_dir);
     if (result != 1) {
         for (;;) { }
     }
@@ -269,7 +324,7 @@ static void test_syscall_modules(void)
     }
 
     result = lucid_user_syscall(
-        SYS_FS_LIST,
+        SYS_FS_READ,
         (uint32_t)syscall_dir,
         sizeof(syscall_dir) - 1,
         (uint32_t)buffer,
@@ -280,16 +335,83 @@ static void test_syscall_modules(void)
     }
 
     result = lucid_user_syscall(
-        SYS_FS_LIST,
+        SYS_FS_READ,
+        (uint32_t)terminal_dir,
+        sizeof(terminal_dir) - 1,
+        (uint32_t)buffer,
+        sizeof(buffer)
+    );
+    if (result != sizeof(terminal_dir_listing) - 1) {
+        for (;;) { }
+    }
+    for (uint32_t i = 0; i < result; i++) {
+        if (buffer[i] != terminal_dir_listing[i]) {
+            for (;;) { }
+        }
+    }
+
+    result = lucid_user_syscall(
+        SYS_FS_WRITE,
+        (uint32_t)terminal_path,
+        sizeof(terminal_path) - 1,
+        (uint32_t)terminal_message,
+        sizeof(terminal_message) - 1
+    );
+    if (result != sizeof(terminal_message) - 1) {
+        for (;;) { }
+    }
+
+    result = lucid_user_syscall(
+        SYS_FS_READ,
+        (uint32_t)terminal_path,
+        sizeof(terminal_path) - 1,
+        (uint32_t)terminal_contents,
+        sizeof(terminal_contents)
+    );
+    if (result != sizeof(terminal_message) - 1) {
+        for (;;) { }
+    }
+    for (uint32_t i = 0; i < result; i++) {
+        if (terminal_contents[i] != terminal_message[i]) {
+            for (;;) { }
+        }
+    }
+
+    result = lucid_user_syscall(
+        SYS_FS_WRITE,
+        (uint32_t)terminal_path,
+        sizeof(terminal_path) - 1,
+        (uint32_t)empty_text,
+        0
+    );
+    if (result != 0) {
+        for (;;) { }
+    }
+    result = lucid_user_syscall(
+        SYS_FS_READ,
+        (uint32_t)terminal_path,
+        sizeof(terminal_path) - 1,
+        (uint32_t)terminal_contents,
+        sizeof(terminal_contents)
+    );
+    if (result != 0) {
+        for (;;) { }
+    }
+
+    result = lucid_user_syscall(
+        SYS_FS_READ,
         (uint32_t)process_dir,
         sizeof(process_dir) - 1,
         (uint32_t)buffer,
         sizeof(buffer)
     );
-    if (result != 10 ||
-        buffer[0] != 'k' || buffer[1] != 'i' ||
-        buffer[5] != 'l' || buffer[6] != 'i') {
+    if (result != sizeof(process_dir_listing) - 1) {
         for (;;) { }
+    }
+    for (uint32_t i = 0; i < result; i++) {
+        if (buffer[i] != process_dir_listing[i]) {
+            for (;;) { }
+        }
     }
 
     result = lucid_user_syscall(
@@ -315,13 +437,7 @@ static void test_syscall_modules(void)
         for (;;) { }
     }
 
-    result = lucid_user_syscall(
-        SYS_FS_STAT,
-        (uint32_t)process_dir,
-        sizeof(process_dir) - 1,
-        0,
-        0
-    );
+    result = (uint32_t)lucid_fs_is_directory(process_dir);
     if (result != 1) {
         for (;;) { }
     }
@@ -337,7 +453,7 @@ static void test_syscall_modules(void)
         for (;;) { }
     }
 
-    uint32_t child_pid = lucid_user_syscall(SYS_FORK, 0, 0, 0, 0);
+    uint32_t child_pid = lucid_process_fork();
     if (child_pid == 0) {
         for (;;) {
             __asm__ volatile ("pause");
@@ -356,22 +472,23 @@ static void test_syscall_modules(void)
     if (result != sizeof(self_image) - 1) {
         for (;;) { }
     }
-    result = lucid_user_syscall(SYS_WAIT, child_pid, 0, 0, 0);
+    result = lucid_process_wait(child_pid);
     if (result != child_pid) {
         for (;;) { }
     }
 
-    result = lucid_user_syscall(
-        SYS_FS_STAT,
-        (uint32_t)system_path,
-        sizeof(system_path) - 1,
-        0,
-        0
-    );
+    result = (uint32_t)lucid_fs_is_directory(system_path);
     if (result != 1) {
         for (;;) { }
     }
     test_posix_file_io();
+    test_file_watch();
+
+    uint32_t start = lucid_get_ticks();
+    uint32_t current = lucid_wait_ticks(2);
+    if ((uint32_t)(current - start) < 2) {
+        for (;;) { }
+    }
 }
 #endif
 
@@ -379,13 +496,15 @@ __attribute__((section(".entry")))
 void pioneer_user_entry(void)
 {
 #ifdef LUCID_TEST_MODE
-    if (lucid_write((const char *)0xFFFFFFFFu, 1) != SYS_UNKNOWN_TEST) {
+    if (lucid_fs_write("/tmp/invalid-pointer",
+                       (const char *)0xFFFFFFFFu, 1) != SYS_UNKNOWN_TEST) {
         for (;;) { }
     }
     test_syscall_modules();
     static const char test_success[] =
         "POSIX file descriptor tests passed\n";
     lucid_write(test_success, sizeof(test_success) - 1);
+    lucid_process_exit(0);
     for (;;) { }
 #endif
     for (;;) {
